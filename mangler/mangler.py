@@ -1,4 +1,5 @@
 import sys
+import hashlib
 import pikepdf
 
 # Character list copied from https://github.com/sypht-team/pdf-anonymizer
@@ -38,13 +39,33 @@ def strip_metadata(pdf):
             meta[key] = keep[key]
 
 
+def create_hash_name(pdf):
+    """
+    Creates a new name for the pdf based on the unique ID.
+    """
+    hash_name = None
+    if "/ID" in pdf.trailer.keys():
+        hash_name = hashlib.md5(bytes(pdf.trailer.ID[0])).hexdigest()
+    else:
+        # Loop through the objects and concatenate contents, then hash.
+        # This ignores metadata and probably doesn't guarantee a consistent ID.
+        contents = b""
+        for obj in pdf.objects:
+            if "/Contents" in obj.keys():
+                contents += obj.Contents.read_raw_bytes()
+
+        hash_name = hashlib.md5(contents).hexdigest()
+
+    return hash_name + ".pdf"
+
+
 def mangle_content(page):
     """
     Mangle the content of a PDF page.
     """
 
 
-def main(in_filename, out_filename):
+def main(in_filename):
     """
     Main function to load, process, and save the PDF.
     """
@@ -57,8 +78,8 @@ def main(in_filename, out_filename):
         mangle_content(page)
 
     # Save the PDF.
-    pdf.save(out_filename)
+    pdf.save(create_hash_name(pdf), fix_metadata_version=False)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[1])
