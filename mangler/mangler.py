@@ -2,9 +2,6 @@ import sys
 import hashlib
 import random
 import zlib
-import warnings
-
-warnings.filterwarnings("error")
 
 import pikepdf
 
@@ -21,6 +18,12 @@ KEEP_META = [
     "HasVisibleOverprint",
     "CreatorSubTool",
     "Producer",
+]
+KEEP_OBJECTS = [
+    "font",
+    "intent_array",
+    "pages_dict",
+    "graphics_state"
 ]
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 
@@ -140,53 +143,79 @@ def mangle_content(stream):
     return pikepdf.unparse_content_stream(commands)
 
 
+def obj_type(obj):
+    """
+    Tries to determine the type of the object.
+    """
+    if isinstance(obj, pikepdf.Dictionary):
+        if "/Type" in obj.keys():
+            if obj.Type == "/Page":
+                return "page"
+            elif obj.Type == "/Pages":
+                return "pages_dict"
+            elif obj.Type == "/Font":
+                return "font"
+        if "/CS" in obj.keys():
+            return "graphics_state"
+
+    elif isinstance(obj, pikepdf.Stream):
+        if "/Type" in obj.keys() and obj.Type == "/Metadata":
+            return "metadata"
+        elif "/Subtype" in obj.keys():
+            if obj.Subtype == "/Image":
+                return "image"
+            elif obj.Subtype == "/Form":
+                return "form"
+        elif any([f"/Length{n}" in obj.keys() for n in [1, 2, 3]]):
+            return "font"
+        else:
+            # some kind of unknown stream
+            return "stream"
+
+    elif isinstance(obj, pikepdf.Array):
+        if all([isinstance(x, pikepdf.Name) for x in obj]):
+            return "intent_array"
+        else:
+            return "unknown"
+    else:
+        return "unknown"
+
+
 def mangle_pdf(pdf):
     """
-    Mangle the contents of a PDF by going through all the objects
+    Mangle the contents of a PDF by going through all the objects.
     """
+    skip_ids = [
+        pdf.Root.unparse(),
+        pdf.trailer.unparse()
+    ]
 
     for obj in pdf.objects:
-        if isinstance(obj, pikepdf.Dictionary):
-            if "/Type" in obj.keys() and obj.Type == "/Page":
-                pikepdf.Page(obj).contents_coalesce()
-                obj.Contents.write(mangle_content(obj.Contents))
-        elif isinstance(obj, pikepdf.Stream):
-            if "/Type" in obj.keys() and obj.Type == "/Metadata":
-                # more metadata, obliterate it
-                del obj
-            elif any([f"/Length{n}" in obj.keys() for n in [1, 2, 3]]):
-                # This is a font stream. Surely there's a better way to identify them.
-                # Keep the fonts as is.
-                pass
-            elif "/Subtype" in obj.keys():
-                if obj.Subtype == pikepdf.Name("/Image"):
-                    # Replace images with random images
-                    replace_image(obj)
-                elif obj.Subtype == pikepdf.Name("/Form"):
-                    # Form XObjects are kind of like sub-pages
-                    obj.write(mangle_content(obj))
-                else:
-                    # Something else to deal with
-                    pass
-            else:
-                # Unknown kind of stream, Try mangling the content
-                try:
-                    obj.write(mangle_content(obj))
-                except Exception as e:
-                    print(
-                        f"Could not mangle unknown stream object {obj.unparse().decode()}: {type(e)}"
-                    )
-        elif isinstance(obj, pikepdf.Array):
-            if obj == pikepdf.Array([pikepdf.Name("/View"), pikepdf.Name("/Design")]):
-                # Defines how layers are used, keep this
-                pass
-            else:
-                pass
-        else:
-            # Something else to deal with
-            print(repr(obj))
-            pass
+        # first make sure it's not the root or trailer
+        if obj.unparse() in skip_ids:
+            continue
 
+        # pattern matching would be good here, but let's maintain backwards compatibility for now
+        t_obj = obj_type(obj)
+        if t_obj == "page":
+            pikepdf.Page(obj).contents_coalesce()
+            obj.Contents.write(mangle_content(obj.Contents))
+        elif t_obj == "form":
+            obj.write(mangle_content(obj))
+        elif t_obj == "stream":
+            try:
+                obj.write(mangle_content(obj))
+            except:
+                # if we can't mangle the stream, just skip it
+                pass
+        elif t_obj == "image":
+            replace_image(obj)
+        elif t_obj in KEEP_OBJECTS:
+            pass
+        elif t_obj in ["unknown", None]:
+            # Unknown object type
+            print(f"Warning: unknown object type {t_obj}")
+            pass
 
 def main(in_filename):
     """

@@ -1,5 +1,8 @@
 import unittest
 import os
+import warnings
+
+warnings.filterwarnings("error")
 
 from mangler import mangler
 
