@@ -48,13 +48,27 @@ def strip_metadata(pdf: pikepdf.Pdf) -> None:
             meta[key] = keep[key]
 
 
-def mangle_ocgs(pdf: pikepdf.Pdf) -> None:
+def mangle_outlines(entry: pikepdf.Dictionary) -> None:
     """
-    Replaces human-readable optional content group names with mangled versions.
+    Recursively mangles the titles of the outline entries
+    """
+    entry.Title = pikepdf.String(replace_text(str(entry.Title)))
+    if "/First" in entry.keys():
+        mangle_outlines(entry.First)
+    if "/Next" in entry.keys():
+        mangle_outlines(entry.Next)
+
+
+def mangle_root(pdf: pikepdf.Pdf) -> None:
+    """
+    Mangles information from the root, such as OCGs and Outlines.
     """
     if "/OCProperties" in pdf.Root.keys() and "/OCGs" in pdf.Root.OCProperties.keys():
         for ocg in pdf.Root.OCProperties.OCGs:
             ocg.Name = pikepdf.String(replace_text(str(ocg.Name)))
+
+    if "/Outlines" in pdf.Root.keys():
+        mangle_outlines(pdf.Root.Outlines.First)
 
 
 def create_hash_name(pdf: pikepdf.Pdf) -> None:
@@ -248,7 +262,7 @@ def main(in_filename: str) -> None:
     # Load the PDF and strip the metadata
     pdf = pikepdf.open(in_filename)
     strip_metadata(pdf)
-    mangle_ocgs(pdf)
+    mangle_root(pdf)
     mangle_pdf(pdf)
 
     # Save the PDF

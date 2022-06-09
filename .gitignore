@@ -162,3 +162,4 @@ cython_debug/
 # PDF stuff
 *.pdf
 !sunny_mountain_overalls.pdf
+!sample-sigconf.pdf
