@@ -21,6 +21,8 @@ KEEP_META = [
 ]
 KEEP_OBJECTS = ["font", "intent_array", "pages_dict", "graphics_state"]
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
+BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
+BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
 
 
 def strip_metadata(pdf: pikepdf.Pdf) -> None:
@@ -115,22 +117,49 @@ def replace_text(text: str) -> str:
     return random_text
 
 
+def mangle_text(operands: list) -> None:
+    """
+    Modifies the text operands.
+    """
+    # Replace text with random characters
+    if isinstance(operands[0], pikepdf.String):
+        operands[0] = pikepdf.String(replace_text(str(operands[0])))
+    elif isinstance(operands[0], pikepdf.Array):
+        for i in range(len(operands[0])):
+            if isinstance(operands[0][i], pikepdf.String):
+                operands[0][i] = pikepdf.String(replace_text(str(operands[0][i])))
+    else:
+        # Not sure what this means, so raise a warning if it happens
+        print(f"Warning: unknown operand {operands[0]}")
+
+
+def mangle_block(block: list) -> None:
+    """
+    Mangles info in a block of commands.
+    """
+    pass
+
+
 def mangle_content(stream: pikepdf.Object) -> bytes:
     """
     Go through the stream instructions and mangle the content.
     Replace text with random characters and distort vector graphics.
     """
     commands = []
+    block = None
     for operands, operator in pikepdf.parse_content_stream(stream):
-        if operator in TEXT_SHOW_OPS:
-            # Replace text with random characters
-            if isinstance(operands[0], pikepdf.String):
-                operands[-1] = pikepdf.String(replace_text(str(operands[-1])))
-            elif isinstance(operands[0], pikepdf.Array):
-                operands[0][-1] = pikepdf.String(replace_text(str(operands[0][-1])))
-            else:
-                # Not sure what this means, so raise a warning if it happens
-                print(f"Warning: unknown operand {operands[0]}")
+        if block is not None:
+            block.append((operands, operator))
+        elif operator in TEXT_SHOW_OPS:
+            mangle_text(operands)
+        elif operator in BLOCK_BEGIN_OPS:
+            # start of a block, so we need to save a buffer and mangle all at once
+            block = [(operands, operator)]
+        elif operator in BLOCK_END_OPS:
+            # end of a block, mangle away
+            mangle_block(block)
+            block = None
+
         # TODO: distort vector graphics
 
         commands.append((operands, operator))
@@ -138,76 +167,45 @@ def mangle_content(stream: pikepdf.Object) -> bytes:
     return pikepdf.unparse_content_stream(commands)
 
 
-def obj_type(obj: pikepdf.Object) -> str:
+def mangle_references(page: pikepdf.Page) -> None:
     """
-    Tries to determine the type of the object.
+    Recursively go through any references on the page and mangle those
     """
-    if isinstance(obj, pikepdf.Dictionary):
-        if "/Type" in obj.keys():
-            if obj.Type == "/Page":
-                return "page"
-            elif obj.Type == "/Pages":
-                return "pages_dict"
-            elif obj.Type == "/Font":
-                return "font"
-        if "/CS" in obj.keys():
-            return "graphics_state"
-
-    elif isinstance(obj, pikepdf.Stream):
-        if "/Type" in obj.keys() and obj.Type == "/Metadata":
-            return "metadata"
-        elif "/Subtype" in obj.keys():
-            if obj.Subtype == "/Image":
-                return "image"
-            elif obj.Subtype == "/Form":
-                return "form"
-        elif any([f"/Length{n}" in obj.keys() for n in [1, 2, 3]]):
-            return "font"
-        else:
-            # some kind of unknown stream
-            return "stream"
-
-    elif isinstance(obj, pikepdf.Array):
-        if all([isinstance(x, pikepdf.Name) for x in obj]):
-            return "intent_array"
-        else:
-            return "unknown"
-    else:
-        return "unknown"
+    if "/Resources" in page.keys() and "/XObject" in page.Resources.keys():
+        for _, xobj in page.Resources.XObject.items():
+            if xobj.Subtype == "/Image":
+                replace_image(xobj)
+            elif xobj.Subtype == "/Form":
+                xobj.write(mangle_content(xobj))
+                # forms might recursively reference other forms
+                mangle_references(xobj)
+    
+    if "/Thumb" in page.keys():
+        # just delete the thumbnail, can't seem to parse the image
+        del page.Thumb
+    
+    if "/PieceInfo" in page.keys():
+        # Delete the PieceInfo, it can be hiding PII metadata
+        del page.PieceInfo
+    
+    if "/B" in page.keys():
+        # Article thread bead, deal with this when we have a good example
+        print("Found an article bead!")
+        pass
 
 
 def mangle_pdf(pdf: pikepdf.Pdf) -> None:
     """
-    Mangle the contents of a PDF by going through all the objects.
+    Mangle the contents of a PDF by going through all the pages and associated objects.
     """
-    skip_ids = [pdf.Root.unparse(), pdf.trailer.unparse()]
 
-    for obj in pdf.objects:
-        # first make sure it's not the root or trailer
-        if obj.unparse() in skip_ids:
-            continue
+    for page in pdf.pages:
+        # first mangle the contents of the page itself
+        page.contents_coalesce()
+        page.Contents.write(mangle_content(page.Contents))
 
-        # pattern matching would be good here, but let's maintain backwards compatibility for now
-        t_obj = obj_type(obj)
-        if t_obj == "page":
-            pikepdf.Page(obj).contents_coalesce()
-            obj.Contents.write(mangle_content(obj.Contents))
-        elif t_obj == "form":
-            obj.write(mangle_content(obj))
-        elif t_obj == "stream":
-            try:
-                obj.write(mangle_content(obj))
-            except:
-                # if we can't mangle the stream, just skip it
-                pass
-        elif t_obj == "image":
-            replace_image(obj)
-        elif t_obj in KEEP_OBJECTS:
-            pass
-        elif t_obj in ["unknown", None]:
-            # Unknown object type
-            print(f"Warning: unknown object type {t_obj}")
-            pass
+        # then deal with the references
+        mangle_references(page)
 
 
 def main(in_filename: str) -> None:
