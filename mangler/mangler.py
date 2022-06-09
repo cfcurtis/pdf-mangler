@@ -179,15 +179,15 @@ def mangle_references(page: pikepdf.Page) -> None:
                 xobj.write(mangle_content(xobj))
                 # forms might recursively reference other forms
                 mangle_references(xobj)
-    
+
     if "/Thumb" in page.keys():
         # just delete the thumbnail, can't seem to parse the image
         del page.Thumb
-    
+
     if "/PieceInfo" in page.keys():
         # Delete the PieceInfo, it can be hiding PII metadata
         del page.PieceInfo
-    
+
     if "/B" in page.keys():
         # Article thread bead, deal with this when we have a good example
         print("Found an article bead!")
