@@ -2,11 +2,10 @@ import sys
 import hashlib
 import random
 import zlib
+import unicodedata
 
 import pikepdf
 
-# Character list copied from https://github.com/sypht-team/pdf-anonymizer
-KEEP_CHARS = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ \t\f\r\u00A0\u2013\u2014\u2018\u2019\u201C\u201D\u2020\u2021\u2022\u2023\u2026\u20AC\u2212\u00A9\u00AE\u00AD"
 KEEP_META = [
     "format",
     "CreatorTool",
@@ -19,6 +18,16 @@ KEEP_META = [
     "CreatorSubTool",
     "Producer",
 ]
+
+# Character map borrowed from https://stackoverflow.com/questions/14245893/efficiently-list-all-characters-in-a-given-unicode-category
+CHAR_CATS = {}
+for c in map(chr, range(sys.maxunicode + 1)):
+    cat = unicodedata.category(c)
+    if cat in CHAR_CATS.keys():
+        CHAR_CATS[cat].append(c)
+    else:
+        CHAR_CATS[cat] = [c]
+
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
 MAX_PATH_TWEAK = 18  # 1/4" in PDF units
@@ -116,17 +125,24 @@ def replace_text(text: str) -> str:
     """
     random_text = ""
     for char in text:
-        if char in KEEP_CHARS:
-            random_text += char
-        elif char.isdigit():
+        # First check if it's an arabic numeral
+        if ord(char) in range(48, 58):
             random_text += str(random.randint(0, 9))
-        elif char.isalpha():
-            if char.isupper():
-                random_text += chr(random.randint(65, 90))
-            else:
-                random_text += chr(random.randint(97, 122))
+        # then check if it's in the upper/lower roman alphabet
+        elif ord(char) in range(65, 91):
+            random_text += chr(random.randint(65, 90))
+        elif ord(char) in range(97, 123):
+            random_text += chr(random.randint(97, 122))
+        # then check the unicode category
         else:
-            random_text += char
+            cat = unicodedata.category(char)
+            if cat[0] in ["P", "M", "Z", "C"]:
+                # Categories from https://unicodebook.readthedocs.io/unicode.html#unicode-categories
+                # punctuation, mark, separator, or "other"
+                random_text += char
+            else:
+                # otherwise replace with a random character from the same category
+                random_text += random.choice(CHAR_CATS[cat])
 
     return random_text
 
