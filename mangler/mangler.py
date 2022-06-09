@@ -19,7 +19,6 @@ KEEP_META = [
     "CreatorSubTool",
     "Producer",
 ]
-KEEP_OBJECTS = ["font", "intent_array", "pages_dict", "graphics_state"]
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
 MAX_PATH_TWEAK = 18  # 1/4" in PDF units
@@ -97,7 +96,6 @@ def replace_image(obj: pikepdf.Object) -> None:
     Something like kittens would be more fun.
     """
     # replacing image code adapted from https://pikepdf.readthedocs.io/en/latest/topics/images.html
-
     pdfimg = pikepdf.PdfImage(obj)
     pil_img = pdfimg.as_pil_image()
 
@@ -149,7 +147,7 @@ def mangle_text(operands: list) -> None:
         print(f"Warning: unknown operand {operands[0]}")
 
 
-def mangle_path(operands: list, operator: str) -> None:
+def mangle_path(operands: list, operator: str) -> list:
     """
     Randomly modifies path construction operands to mangle vector graphics.
     """
