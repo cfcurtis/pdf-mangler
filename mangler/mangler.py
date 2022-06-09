@@ -21,6 +21,8 @@ KEEP_META = [
 ]
 KEEP_OBJECTS = ["font", "intent_array", "pages_dict", "graphics_state"]
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
+PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
+MAX_PATH_TWEAK = 18  # 1/4" in PDF units
 BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
 BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
 
@@ -133,11 +135,42 @@ def mangle_text(operands: list) -> None:
         print(f"Warning: unknown operand {operands[0]}")
 
 
+def mangle_path(operands: list, operator: str) -> None:
+    """
+    Randomly modifies path construction operands to mangle vector graphics.
+    """
+    new_ops = list(operands)
+    tweak_ids = []
+    if operator in ["m", "l"]:
+        # single point to start/end path
+        tweak_ids = [0, 1]
+    if operator == "c":
+        # Bezier curve with two control points.
+        # Don't modify the control points, just the end point
+        tweak_ids = [4, 5]
+    if operator in ["v", "y"]:
+        # Bezier curves with one control point.
+        # Don't modify the control point, just the end point.
+        tweak_ids = [2, 3]
+    if operator == "re":
+        # rectangle. Modify them all
+        tweak_ids = [0, 1, 2, 3]
+
+    for id in tweak_ids:
+        new_ops[id] = new_ops[id] + random.randint(-MAX_PATH_TWEAK, MAX_PATH_TWEAK)
+
+    return new_ops
+
+
 def mangle_block(block: list) -> None:
     """
     Mangles info in a block of commands.
     """
-    pass
+    if block[0][1] == pikepdf.Operator("BI"):
+        # Inline image
+        print("Inline image detected, not yet handled")
+    else:
+        print(f"Block starting with {block[0][1]} detected, not yet handled")
 
 
 def mangle_content(stream: pikepdf.Object) -> bytes:
@@ -159,8 +192,8 @@ def mangle_content(stream: pikepdf.Object) -> bytes:
             # end of a block, mangle away
             mangle_block(block)
             block = None
-
-        # TODO: distort vector graphics
+        elif operator in PATH_CONSTRUCTION_OPS:
+            operands = mangle_path(operands, str(operator))
 
         commands.append((operands, operator))
 
