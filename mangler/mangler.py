@@ -254,6 +254,15 @@ def mangle_references(page: pikepdf.Page) -> None:
         print("Found an article bead!")
         pass
 
+    if "/Annots" in page.keys():
+        # annotations
+        for annot in page.Annots:
+            if annot.Subtype == "/Link":
+                # mangle the URI
+                if "/URI" in annot.A.keys():
+                    annot.A.URI = pikepdf.String(replace_text(str(annot.A.URI)))
+                # otherwise if it's an internal link, that's fine
+
 
 def mangle_pdf(pdf: pikepdf.Pdf) -> None:
     """
