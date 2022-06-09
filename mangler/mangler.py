@@ -19,16 +19,11 @@ KEEP_META = [
     "CreatorSubTool",
     "Producer",
 ]
-KEEP_OBJECTS = [
-    "font",
-    "intent_array",
-    "pages_dict",
-    "graphics_state"
-]
+KEEP_OBJECTS = ["font", "intent_array", "pages_dict", "graphics_state"]
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 
 
-def strip_metadata(pdf):
+def strip_metadata(pdf: pikepdf.Pdf) -> None:
     """
     Remove identifying information from the PDF.
     """
@@ -49,16 +44,16 @@ def strip_metadata(pdf):
             meta[key] = keep[key]
 
 
-def mangle_ocgs(pdf):
+def mangle_ocgs(pdf: pikepdf.Pdf) -> None:
     """
     Replaces human-readable optional content group names with mangled versions.
     """
     if "/OCProperties" in pdf.Root.keys() and "/OCGs" in pdf.Root.OCProperties.keys():
         for ocg in pdf.Root.OCProperties.OCGs:
-            ocg.Name = replace_text(str(ocg.Name))
+            ocg.Name = pikepdf.String(replace_text(str(ocg.Name)))
 
 
-def create_hash_name(pdf):
+def create_hash_name(pdf: pikepdf.Pdf) -> None:
     """
     Creates a new name for the pdf based on the unique ID.
     """
@@ -78,7 +73,7 @@ def create_hash_name(pdf):
     return hash_name + ".pdf"
 
 
-def replace_image(obj):
+def replace_image(obj: pikepdf.Object) -> None:
     """
     Replaces the image object with a random uniform colour image.
     Something like kittens would be more fun.
@@ -98,7 +93,7 @@ def replace_image(obj):
     obj.write(zlib.compress(pil_img.tobytes()), filter=pikepdf.Name("/FlateDecode"))
 
 
-def replace_text(text):
+def replace_text(text: str) -> str:
     """
     Replace text with random characters, preserving punctuation,
     case, and numeric type.
@@ -117,10 +112,10 @@ def replace_text(text):
         else:
             random_text += char
 
-    return pikepdf.String(random_text)
+    return random_text
 
 
-def mangle_content(stream):
+def mangle_content(stream: pikepdf.Object) -> bytes:
     """
     Go through the stream instructions and mangle the content.
     Replace text with random characters and distort vector graphics.
@@ -130,9 +125,9 @@ def mangle_content(stream):
         if operator in TEXT_SHOW_OPS:
             # Replace text with random characters
             if isinstance(operands[0], pikepdf.String):
-                operands[-1] = replace_text(str(operands[-1]))
+                operands[-1] = pikepdf.String(replace_text(str(operands[-1])))
             elif isinstance(operands[0], pikepdf.Array):
-                operands[0][-1] = replace_text(str(operands[0][-1]))
+                operands[0][-1] = pikepdf.String(replace_text(str(operands[0][-1])))
             else:
                 # Not sure what this means, so raise a warning if it happens
                 print(f"Warning: unknown operand {operands[0]}")
@@ -143,7 +138,7 @@ def mangle_content(stream):
     return pikepdf.unparse_content_stream(commands)
 
 
-def obj_type(obj):
+def obj_type(obj: pikepdf.Object) -> str:
     """
     Tries to determine the type of the object.
     """
@@ -181,14 +176,11 @@ def obj_type(obj):
         return "unknown"
 
 
-def mangle_pdf(pdf):
+def mangle_pdf(pdf: pikepdf.Pdf) -> None:
     """
     Mangle the contents of a PDF by going through all the objects.
     """
-    skip_ids = [
-        pdf.Root.unparse(),
-        pdf.trailer.unparse()
-    ]
+    skip_ids = [pdf.Root.unparse(), pdf.trailer.unparse()]
 
     for obj in pdf.objects:
         # first make sure it's not the root or trailer
@@ -217,7 +209,8 @@ def mangle_pdf(pdf):
             print(f"Warning: unknown object type {t_obj}")
             pass
 
-def main(in_filename):
+
+def main(in_filename: str) -> None:
     """
     Main function to load, process, and save the PDF.
     """
