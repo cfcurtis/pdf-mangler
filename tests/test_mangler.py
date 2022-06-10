@@ -4,7 +4,7 @@ import warnings
 
 warnings.filterwarnings("error")
 
-from mangler import mangler
+from pdf_mangler import mangler
 
 # set the cwd to the tests directory
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
