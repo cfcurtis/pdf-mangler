@@ -2,9 +2,9 @@ import sys
 import hashlib
 import random
 import zlib
-import unicodedata
 
 import pikepdf
+import text
 
 KEEP_META = [
     "format",
@@ -19,56 +19,12 @@ KEEP_META = [
     "Producer",
 ]
 
-# Categories from https://unicodebook.readthedocs.io/unicode.html#unicode-categories
-# Default character categories, assuming roman alphabet and punctuation
-CHAR_CATS = {
-    "Lu": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-    "Ll": "abcdefghijklmnopqrstuvwxyz",
-    "Nd": "0123456789",
-}
-# punctuation, mark, separator, or "other"
-PASS_CATS = "PMZCS"
-
+FONT_CHANGE = pikepdf.Operator("Tf")
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
 MAX_PATH_TWEAK = 18  # 1/4" in PDF units
 BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
 BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
-
-
-def categorize_chars(charset: str) -> dict:
-    """
-    Maps the characters in the given charset to their Unicode category.
-    """
-    cats = {}
-    for cat, char in zip(map(unicodedata.category, charset), charset):
-        if cat[0] in PASS_CATS:
-            pass
-        elif cat not in cats.keys():
-            cats[cat] = char
-        else:
-            cats[cat] += char
-
-    return cats
-
-
-def replace_text(text: str, char_cats: dict = CHAR_CATS) -> str:
-    """
-    Replace text with random characters, preserving punctuation,
-    case, and numeric type.
-    """
-    random_text = ""
-    for cat, char in zip(map(unicodedata.category, text), text):
-        if cat[0] in PASS_CATS:
-            random_text += char
-        elif cat in char_cats.keys():
-            # otherwise replace with a random character from the same category
-            random_text += random.choice(char_cats[cat])
-        else:
-            print(f"Warning: Passing through {char} with unknown category {cat}")
-            random_text += char
-
-    return random_text
 
 
 def replace_image(obj: pikepdf.Object) -> None:
@@ -93,6 +49,10 @@ def replace_image(obj: pikepdf.Object) -> None:
 class Mangler:
     def __init__(self, filename: str) -> None:
         self.pdf = pikepdf.Pdf.open(filename)
+        self.state = {"cur_pt": None, "cur_font": "default"}
+        self.font_map = {
+            "default": text.CHAR_CATS,
+        }
 
     def strip_metadata(self) -> None:
         """
@@ -118,7 +78,7 @@ class Mangler:
         """
         Recursively mangles the titles of the outline entries
         """
-        entry.Title = pikepdf.String(replace_text(str(entry.Title)))
+        entry.Title = pikepdf.String(text.replace_text(str(entry.Title)))
         if "/First" in entry.keys():
             self.mangle_outlines(entry.First)
         if "/Next" in entry.keys():
@@ -130,7 +90,7 @@ class Mangler:
         """
         if "/OCProperties" in self.pdf.Root.keys() and "/OCGs" in self.pdf.Root.OCProperties.keys():
             for ocg in self.pdf.Root.OCProperties.OCGs:
-                ocg.Name = pikepdf.String(replace_text(str(ocg.Name)))
+                ocg.Name = pikepdf.String(text.replace_text(str(ocg.Name)))
 
         if "/Outlines" in self.pdf.Root.keys():
             self.mangle_outlines(self.pdf.Root.Outlines.First)
@@ -154,17 +114,33 @@ class Mangler:
 
         return hash_name + ".pdf"
 
+    def define_font_maps(self, page: pikepdf.Page) -> None:
+        """
+        Parses the fonts on the page and defines the character/category mapping
+        """
+        for name, font in page.Resources.Font.items():
+            if "/FontDescriptor" in font.keys() and "/CharSet" in font.FontDescriptor.keys():
+                self.font_map[name] = text.categorize_chars(str(font.FontDescriptor.CharSet))
+            else:
+                print(f"Font {name} has no CharSet specified, TBD")
+
     def mangle_text(self, operands: list) -> None:
         """
         Modifies the text operands.
         """
         # Replace text with random characters
         if isinstance(operands[0], pikepdf.String):
-            operands[0] = pikepdf.String(replace_text(str(operands[0])))
+            operands[0] = pikepdf.String(
+                text.replace_text(str(operands[0]), self.font_map[self.state["cur_font"]])
+            )
         elif isinstance(operands[0], pikepdf.Array):
             for i in range(len(operands[0])):
                 if isinstance(operands[0][i], pikepdf.String):
-                    operands[0][i] = pikepdf.String(replace_text(str(operands[0][i])))
+                    operands[0][i] = pikepdf.String(
+                        text.replace_text(
+                            str(operands[0][i]), self.font_map[self.state["cur_font"]]
+                        )
+                    )
         else:
             # Not sure what this means, so raise a warning if it happens
             print(f"Warning: unknown operand {operands[0]}")
@@ -215,6 +191,8 @@ class Mangler:
         for operands, operator in pikepdf.parse_content_stream(stream):
             if block is not None:
                 block.append((operands, operator))
+            elif operator == FONT_CHANGE:
+                self.state["cur_font"] = operands[0]
             elif operator in TEXT_SHOW_OPS:
                 self.mangle_text(operands)
             elif operator in BLOCK_BEGIN_OPS:
@@ -263,7 +241,7 @@ class Mangler:
                 if annot.Subtype == "/Link":
                     # mangle the URI
                     if "/URI" in annot.A.keys():
-                        annot.A.URI = pikepdf.String(replace_text(str(annot.A.URI)))
+                        annot.A.URI = pikepdf.String(text.replace_text(str(annot.A.URI)))
                     # otherwise if it's an internal link, that's fine
 
     def mangle_pdf(self) -> None:
@@ -275,6 +253,9 @@ class Mangler:
         self.mangle_root()
 
         for page in self.pdf.pages:
+            # define the character maps of the fonts on the page
+            self.define_font_maps(page)
+
             # first mangle the contents of the page itself
             page.Contents.write(self.mangle_content(page))
 
