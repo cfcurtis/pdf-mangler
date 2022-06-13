@@ -29,13 +29,20 @@ with open(os.path.join(os.path.dirname(__file__), "glyphlist.txt"), "r") as f:
             GLYPHLIST[pdf_name] = chr(int(unicode_hex, 16))
 
 
-def categorize_chars(charset: str) -> dict:
+def map_charset(charset: str) -> dict:
     """
     Maps the characters in the given charset to their Unicode category.
     """
     char_glyphs = get_font_glyphs(charset)
+    return categorize_glyphs(char_glyphs)
+
+
+def categorize_glyphs(glyphs: str) -> dict:
+    """
+    Maps the characters in the given glyphs to their Unicode category.
+    """
     cats = {}
-    for cat, char in zip(map(unicodedata.category, char_glyphs), char_glyphs):
+    for cat, char in zip(map(unicodedata.category, glyphs), glyphs):
         if cat[0] in PASS_CATS:
             pass
         elif cat not in cats.keys():
@@ -44,6 +51,14 @@ def categorize_chars(charset: str) -> dict:
             cats[cat] += char
 
     return cats
+
+
+def map_numeric_range(first: int, last: int) -> dict:
+    """
+    Maps the characters in a given numeric range to their Unicode category.
+    """
+    glyphs = [chr(i) for i in range(first, last + 1)]
+    return categorize_glyphs(glyphs)
 
 
 def get_font_glyphs(charset):

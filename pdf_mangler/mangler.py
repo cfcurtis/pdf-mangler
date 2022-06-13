@@ -120,7 +120,12 @@ class Mangler:
         """
         for name, font in page.Resources.Font.items():
             if "/FontDescriptor" in font.keys() and "/CharSet" in font.FontDescriptor.keys():
-                self.font_map[name] = text.categorize_chars(str(font.FontDescriptor.CharSet))
+                self.font_map[name] = text.map_charset(str(font.FontDescriptor.CharSet))
+            elif "/FirstChar" in font.keys():
+                # define the map based on the first char and last char
+                self.font_map[name] = text.map_numeric_range(
+                    int(font.FirstChar), int(font.LastChar)
+                )
             else:
                 print(f"Font {name} has no CharSet specified, TBD")
 

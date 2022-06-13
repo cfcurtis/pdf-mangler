@@ -9,7 +9,7 @@
             "type": "python",
             "request": "launch",
             "program": "${file}",
-            "args": ["tests/sample-sigconf.pdf"],
+            "args": ["tests/sunny_mountain_overalls.pdf"],
             "console": "integratedTerminal",
             "justMyCode": true
         }
