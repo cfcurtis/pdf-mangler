@@ -12,4 +12,6 @@ os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
 class TestMangler(unittest.TestCase):
     def test_integration(self):
-        mangler.main("sunny_mountain_overalls.pdf")
+        mglr = mangler.Mangler("sunny_mountain_overalls.pdf")
+        mglr.mangle_pdf()
+        mglr.save()
