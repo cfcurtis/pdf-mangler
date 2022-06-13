@@ -19,14 +19,15 @@ KEEP_META = [
     "Producer",
 ]
 
-# Character map borrowed from https://stackoverflow.com/questions/14245893/efficiently-list-all-characters-in-a-given-unicode-category
-CHAR_CATS = {}
-for c in map(chr, range(sys.maxunicode + 1)):
-    cat = unicodedata.category(c)
-    if cat in CHAR_CATS.keys():
-        CHAR_CATS[cat].append(c)
-    else:
-        CHAR_CATS[cat] = [c]
+# Categories from https://unicodebook.readthedocs.io/unicode.html#unicode-categories
+# Default character categories, assuming roman alphabet and punctuation
+CHAR_CATS = {
+    "Lu": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "Ll": "abcdefghijklmnopqrstuvwxyz",
+    "Nd": "0123456789",
+}
+# punctuation, mark, separator, or "other"
+PASS_CATS = "PMZCS"
 
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
@@ -35,31 +36,37 @@ BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
 BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
 
 
-def replace_text(text: str) -> str:
+def categorize_chars(charset: str) -> dict:
+    """
+    Maps the characters in the given charset to their Unicode category.
+    """
+    cats = {}
+    for cat, char in zip(map(unicodedata.category, charset), charset):
+        if cat[0] in PASS_CATS:
+            pass
+        elif cat not in cats.keys():
+            cats[cat] = char
+        else:
+            cats[cat] += char
+
+    return cats
+
+
+def replace_text(text: str, char_cats: dict = CHAR_CATS) -> str:
     """
     Replace text with random characters, preserving punctuation,
     case, and numeric type.
     """
     random_text = ""
-    for char in text:
-        # First check if it's an arabic numeral
-        if ord(char) in range(48, 58):
-            random_text += str(random.randint(0, 9))
-        # then check if it's in the upper/lower roman alphabet
-        elif ord(char) in range(65, 91):
-            random_text += chr(random.randint(65, 90))
-        elif ord(char) in range(97, 123):
-            random_text += chr(random.randint(97, 122))
-        # then check the unicode category
+    for cat, char in zip(map(unicodedata.category, text), text):
+        if cat[0] in PASS_CATS:
+            random_text += char
+        elif cat in char_cats.keys():
+            # otherwise replace with a random character from the same category
+            random_text += random.choice(char_cats[cat])
         else:
-            cat = unicodedata.category(char)
-            if cat[0] in ["P", "M", "Z", "C"]:
-                # Categories from https://unicodebook.readthedocs.io/unicode.html#unicode-categories
-                # punctuation, mark, separator, or "other"
-                random_text += char
-            else:
-                # otherwise replace with a random character from the same category
-                random_text += random.choice(CHAR_CATS[cat])
+            print(f"Warning: Passing through {char} with unknown category {cat}")
+            random_text += char
 
     return random_text
 
@@ -269,8 +276,7 @@ class Mangler:
 
         for page in self.pdf.pages:
             # first mangle the contents of the page itself
-            page.contents_coalesce()
-            page.Contents.write(self.mangle_content(page.Contents))
+            page.Contents.write(self.mangle_content(page))
 
             # then deal with the references
             self.mangle_references(page)
