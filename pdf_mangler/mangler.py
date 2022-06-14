@@ -4,7 +4,7 @@ import random
 import zlib
 
 import pikepdf
-import text
+from pdf_mangler.fonts import utils as fu
 
 KEEP_META = [
     "format",
@@ -51,7 +51,7 @@ class Mangler:
         self.pdf = pikepdf.Pdf.open(filename)
         self.state = {"cur_pt": None, "cur_font": "default"}
         self.font_map = {
-            "default": text.CHAR_CATS,
+            "default": fu.CHAR_CATS,
         }
 
     def strip_metadata(self) -> None:
@@ -78,7 +78,7 @@ class Mangler:
         """
         Recursively mangles the titles of the outline entries
         """
-        entry.Title = pikepdf.String(text.replace_text(str(entry.Title)))
+        entry.Title = pikepdf.String(fu.replace_text(str(entry.Title)))
         if "/First" in entry.keys():
             self.mangle_outlines(entry.First)
         if "/Next" in entry.keys():
@@ -90,7 +90,7 @@ class Mangler:
         """
         if "/OCProperties" in self.pdf.Root.keys() and "/OCGs" in self.pdf.Root.OCProperties.keys():
             for ocg in self.pdf.Root.OCProperties.OCGs:
-                ocg.Name = pikepdf.String(text.replace_text(str(ocg.Name)))
+                ocg.Name = pikepdf.String(fu.replace_text(str(ocg.Name)))
 
         if "/Outlines" in self.pdf.Root.keys():
             self.mangle_outlines(self.pdf.Root.Outlines.First)
@@ -120,12 +120,10 @@ class Mangler:
         """
         for name, font in page.Resources.Font.items():
             if "/FontDescriptor" in font.keys() and "/CharSet" in font.FontDescriptor.keys():
-                self.font_map[name] = text.map_charset(str(font.FontDescriptor.CharSet))
+                self.font_map[name] = fu.map_charset(str(font.FontDescriptor.CharSet))
             elif "/FirstChar" in font.keys():
                 # define the map based on the first char and last char
-                self.font_map[name] = text.map_numeric_range(
-                    int(font.FirstChar), int(font.LastChar)
-                )
+                self.font_map[name] = fu.map_numeric_range(int(font.FirstChar), int(font.LastChar))
             else:
                 print(f"Font {name} has no CharSet specified, TBD")
 
@@ -136,15 +134,13 @@ class Mangler:
         # Replace text with random characters
         if isinstance(operands[0], pikepdf.String):
             operands[0] = pikepdf.String(
-                text.replace_text(str(operands[0]), self.font_map[self.state["cur_font"]])
+                fu.replace_text(str(operands[0]), self.font_map[self.state["cur_font"]])
             )
         elif isinstance(operands[0], pikepdf.Array):
             for i in range(len(operands[0])):
                 if isinstance(operands[0][i], pikepdf.String):
                     operands[0][i] = pikepdf.String(
-                        text.replace_text(
-                            str(operands[0][i]), self.font_map[self.state["cur_font"]]
-                        )
+                        fu.replace_text(str(operands[0][i]), self.font_map[self.state["cur_font"]])
                     )
         else:
             # Not sure what this means, so raise a warning if it happens
@@ -246,7 +242,7 @@ class Mangler:
                 if annot.Subtype == "/Link":
                     # mangle the URI
                     if "/URI" in annot.A.keys():
-                        annot.A.URI = pikepdf.String(text.replace_text(str(annot.A.URI)))
+                        annot.A.URI = pikepdf.String(fu.replace_text(str(annot.A.URI)))
                     # otherwise if it's an internal link, that's fine
 
     def mangle_pdf(self) -> None:
