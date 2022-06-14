@@ -270,12 +270,12 @@ class Mangler:
         self.pdf.save(self.create_hash_name(), fix_metadata_version=False)
 
 
-def main(in_filename: str) -> None:
+def main() -> None:
     """
     Main function to create and run the Mangler.
     """
     # Load the PDF and strip the metadata
-    mglr = Mangler(in_filename)
+    mglr = Mangler(sys.argv[1])
     mglr.mangle_pdf()
 
     # Save the resulting PDF
@@ -283,4 +283,4 @@ def main(in_filename: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main()
