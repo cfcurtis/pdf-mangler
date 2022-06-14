@@ -71,8 +71,33 @@ def replace_image(obj: pikepdf.Object) -> None:
 
 
 class Mangler:
-    def __init__(self, filename: str) -> None:
+    def __init__(self, filename: str = None, pdf: pikepdf.Pdf = None) -> None:
+        """
+        Initialize with a new filename or already opened pdf object.
+        """
+        if filename:
+            self.filename = filename
+        elif pdf:
+            self._pdf = pdf
+
+    @property
+    def filename(self) -> str:
+        return self._pdf.filename
+
+    @filename.setter
+    def filename(self, filename: str) -> None:
         self.pdf = pikepdf.Pdf.open(filename)
+
+    @property
+    def pdf(self) -> pikepdf.Pdf:
+        return self._pdf
+
+    @pdf.setter
+    def pdf(self, pdf: pikepdf.Pdf) -> None:
+        """
+        Sets the pdf and initializes state.
+        """
+        self._pdf = pdf
         self.create_hash_name()
         self.state = {"point": None, "font": "default", "page": 0, "page_dims": [0, 0, 0]}
         self.font_map = {
@@ -85,17 +110,17 @@ class Mangler:
         """
         # retain information on creator tool
         keep = {}
-        with self.pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
+        with self._pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
             for key in meta.keys():
                 if any([field in key for field in KEEP_META]):
                     keep[key] = meta[key]
 
         # obliterate the rest
-        del self.pdf.Root.Metadata
-        del self.pdf.docinfo
+        del self._pdf.Root.Metadata
+        del self._pdf.docinfo
 
         # Recreate the metadata with just the fields of interest
-        with self.pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
+        with self._pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
             for key in keep.keys():
                 meta[key] = keep[key]
 
@@ -113,24 +138,27 @@ class Mangler:
         """
         Mangles information from the root, such as OCGs and Outlines.
         """
-        if "/OCProperties" in self.pdf.Root.keys() and "/OCGs" in self.pdf.Root.OCProperties.keys():
-            for ocg in self.pdf.Root.OCProperties.OCGs:
+        if (
+            "/OCProperties" in self._pdf.Root.keys()
+            and "/OCGs" in self._pdf.Root.OCProperties.keys()
+        ):
+            for ocg in self._pdf.Root.OCProperties.OCGs:
                 ocg.Name = pikepdf.String(tu.replace_text(str(ocg.Name)))
 
-        if "/Outlines" in self.pdf.Root.keys():
-            self.mangle_outlines(self.pdf.Root.Outlines.First)
+        if "/Outlines" in self._pdf.Root.keys():
+            self.mangle_outlines(self._pdf.Root.Outlines.First)
 
     def create_hash_name(self) -> None:
         """
         Creates a new name for the pdf based on the unique ID.
         """
-        if "/ID" in self.pdf.trailer.keys():
-            self.hash_name = hashlib.md5(bytes(self.pdf.trailer.ID[0])).hexdigest()
+        if "/ID" in self._pdf.trailer.keys():
+            self.hash_name = hashlib.md5(bytes(self._pdf.trailer.ID[0])).hexdigest()
         else:
             # Loop through the objects and concatenate contents, then hash.
             # This ignores metadata and probably doesn't guarantee a consistent ID.
             contents = b""
-            for obj in self.pdf.objects:
+            for obj in self._pdf.objects:
                 if "/Contents" in obj.keys():
                     contents += obj.Contents.read_raw_bytes()
 
@@ -332,16 +360,16 @@ class Mangler:
         Mangle the metadata and content of the pdf.
         """
 
-        logger.info(f"Mangling PDF with {len(self.pdf.pages)} pages")
+        logger.info(f"Mangling PDF with {len(self._pdf.pages)} pages")
 
         self.strip_metadata()
         self.mangle_root()
 
-        for page in self.pdf.pages:
+        for page in self._pdf.pages:
             self.state["page"] = page.index
 
             # first mangle the contents of the page itself
-            page.Contents = self.pdf.make_stream(self.mangle_content(page))
+            page.Contents = self._pdf.make_stream(self.mangle_content(page))
 
             # then deal with the references
             self.mangle_references(page)
@@ -350,7 +378,7 @@ class Mangler:
         """
         Save the mangled pdf.
         """
-        self.pdf.save(self.hash_name, fix_metadata_version=False)
+        self._pdf.save(self.hash_name, fix_metadata_version=False)
 
 
 def main() -> None:
