@@ -4,6 +4,7 @@ import random
 import zlib
 import logging
 import time
+from tqdm import tqdm
 
 import pikepdf
 from pdf_mangler import text_utils as tu
@@ -26,7 +27,7 @@ TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
 CLIPPING_PATH_OPS = [pikepdf.Operator(op) for op in ["W", "W*"]]
 MAX_PATH_TWEAK = 0.2  # Percent
-MIN_PATH_TWEAK = 9  # pdf units, 1/8"
+MIN_PATH_TWEAK = 18  # pdf units, 1/4"
 BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
 BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
 
@@ -56,9 +57,16 @@ def replace_image(obj: pikepdf.Object) -> None:
     Replaces the image object with a random uniform colour image.
     Something like kittens would be more fun.
     """
+    if "/SMask" in obj.keys():
+        replace_image(obj.SMask)
+
     # replacing image code adapted from https://pikepdf.readthedocs.io/en/latest/topics/images.html
     pdfimg = pikepdf.PdfImage(obj)
-    pil_img = pdfimg.as_pil_image()
+    try:
+        pil_img = pdfimg.as_pil_image()
+    except pikepdf.PdfError:
+        logger.warning(f"Could not convert image {obj.objgen} to PIL image")
+        return
 
     # copy a random pixel value to all pixels
     pix = pil_img.getpixel(
@@ -320,7 +328,7 @@ class Mangler:
         Recursively go through any references on the page and mangle those
         """
         if "/Resources" in page.keys() and "/XObject" in page.Resources.keys():
-            for _, xobj in page.Resources.XObject.items():
+            for _, xobj in tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False):
                 if xobj.Subtype == "/Image":
                     replace_image(xobj)
                 elif xobj.Subtype == "/Form":
@@ -364,7 +372,8 @@ class Mangler:
         self.strip_metadata()
         self.mangle_root()
 
-        for page in self._pdf.pages:
+        print(f"Mangling PDF with {len(self._pdf.pages)} pages")
+        for page in tqdm(self._pdf.pages, desc="Pages"):
             self.state["page"] = page.index
 
             # first mangle the contents of the page itself
