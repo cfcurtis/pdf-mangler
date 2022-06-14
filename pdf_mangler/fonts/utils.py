@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 # Categories from https://unicodebook.readthedocs.io/unicode.html#unicode-categories
 # Default character categories, assuming roman alphabet and punctuation
-CHAR_CATS = {
+DEFAULT_CATS = {
     "Lu": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "Ll": "abcdefghijklmnopqrstuvwxyz",
     "Nd": "0123456789",
@@ -91,7 +91,7 @@ def get_font_glyphs(charset):
     return glyphs
 
 
-def replace_text(text: str, char_cats: dict = CHAR_CATS) -> str:
+def replace_text(text: str, char_cats: dict = DEFAULT_CATS) -> str:
     """
     Replace text with random characters, preserving punctuation,
     case, and numeric type.

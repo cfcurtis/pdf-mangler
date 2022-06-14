@@ -56,7 +56,7 @@ class Mangler:
         self.create_hash_name()
         self.state = {"point": None, "font": "default", "page": 0}
         self.font_map = {
-            "default": fu.CHAR_CATS,
+            "default": fu.DEFAULT_CATS,
         }
 
     def strip_metadata(self) -> None:
