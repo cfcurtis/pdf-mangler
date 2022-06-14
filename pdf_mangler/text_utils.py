@@ -11,10 +11,14 @@ DEFAULT_CATS = {
     "Lu": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "Ll": "abcdefghijklmnopqrstuvwxyz",
     "Nd": "0123456789",
-    "default": {},
+    "default": {
+        "Lu": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+        "Ll": "abcdefghijklmnopqrstuvwxyz",
+        "Nd": "0123456789",
+    },
 }
 # punctuation, mark, separator, or "other"
-PASS_CATS = "PMZCS"
+PASS_CATS = set("PMZCS")
 
 # Read the glyphlist file and define as a constant
 GLYPHLIST = {}
@@ -57,8 +61,11 @@ def categorize_glyphs(glyphs: str) -> dict:
     # create a subset of the categories that are in the default categories
     cats["default"] = {}
     for key in cats.keys():
+        if key == "default":
+            continue
+
         if key in DEFAULT_CATS.keys():
-            isect = list(set(cats[key]).intersection(set(DEFAULT_CATS[key])))
+            isect = "".join(set(cats[key]).intersection(set(DEFAULT_CATS[key])))
             if len(isect) > 0:
                 cats["default"][key] = isect
 
