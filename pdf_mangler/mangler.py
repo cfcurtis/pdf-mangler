@@ -24,11 +24,24 @@ KEEP_META = [
 FONT_CHANGE = pikepdf.Operator("Tf")
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
-MAX_PATH_TWEAK = 18  # 1/4" in PDF units
+CLIPPING_PATH_OPS = [pikepdf.Operator(op) for op in ["W", "W*"]]
+MAX_PATH_TWEAK = 0.2  # Percent
 BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
 BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
 
 logger = logging.getLogger(__name__)
+
+
+def get_page_diag(page: pikepdf.Page) -> float:
+    """
+    Checks the various boxes defined on the page and returns the smallest one.
+    """
+    diag = float("inf")
+    for key in page.keys():
+        if "Box" in key:
+            diag = min(diag, (float(page[key][2]) ** 2 + float(page[key][3]) ** 2) ** 0.5)
+
+    return diag
 
 
 def replace_image(obj: pikepdf.Object) -> None:
@@ -54,7 +67,7 @@ class Mangler:
     def __init__(self, filename: str) -> None:
         self.pdf = pikepdf.Pdf.open(filename)
         self.create_hash_name()
-        self.state = {"point": None, "font": "default", "page": 0}
+        self.state = {"point": None, "font": "default", "page": 0, "page_diag": 0}
         self.font_map = {
             "default": fu.DEFAULT_CATS,
         }
@@ -156,25 +169,44 @@ class Mangler:
         """
         Randomly modifies path construction operands to mangle vector graphics.
         """
-        new_ops = list(operands)
-        tweak_ids = []
-        if operator in ["m", "l"]:
-            # single point to start/end path
-            tweak_ids = [0, 1]
-        if operator == "c":
+        operands = [float(op) for op in operands]
+        new_ops = operands.copy()
+        new_point_ids = None
+
+        if operator == "m":
+            # single point to start/end path, don't modify
+            self.state["point"] = (operands[0], operands[1])
+        elif operator == "l":
+            # end of a path
+            new_point_ids = (0, 1)
+        elif operator == "c":
             # Bezier curve with two control points.
             # Don't modify the control points, just the end point
-            tweak_ids = [4, 5]
-        if operator in ["v", "y"]:
+            new_point_ids = (4, 5)
+        elif operator in ["v", "y"]:
             # Bezier curves with one control point.
             # Don't modify the control point, just the end point.
-            tweak_ids = [2, 3]
-        if operator == "re":
-            # rectangle. Modify them all
-            tweak_ids = [0, 1, 2, 3]
+            new_point_ids = (2, 3)
+        elif operator == "re":
+            # rectangle, handle it separately
+            diag = (operands[2] ** 2 + operands[3] ** 2) ** 0.5
 
-        for id in tweak_ids:
-            new_ops[id] = new_ops[id] + random.randint(-MAX_PATH_TWEAK, MAX_PATH_TWEAK)
+            # if the rectangle covers most of the page, don't modify it (likely a border)
+            if diag < self.state["page_diag"] * 0.5:
+                for i in range(4):
+                    new_ops[i] = operands[i] + random.random() * diag * MAX_PATH_TWEAK
+        else:
+            # Don't know what this is, so raise a warning if it happens
+            logger.warning(f"Unknown path operator {operator} found on page {self.state['page']}")
+
+        if new_point_ids is not None:
+            dist = (
+                (operands[new_point_ids[0]] - self.state["point"][0]) ** 2
+                + (operands[new_point_ids[1]] - self.state["point"][1]) ** 2
+            ) ** 0.5
+            for id in new_point_ids:
+                new_ops[id] = operands[id] + random.random() * dist * MAX_PATH_TWEAK
+            self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
 
         return new_ops
 
@@ -195,15 +227,19 @@ class Mangler:
         Go through the stream instructions and mangle the content.
         Replace text with random characters and distort vector graphics.
         """
+        og_commands = pikepdf.parse_content_stream(stream)
         commands = []
         block = None
-        for operands, operator in pikepdf.parse_content_stream(stream):
+        for i, (operands, operator) in enumerate(og_commands):
             if block is not None:
                 block.append((operands, operator))
             elif operator == FONT_CHANGE:
                 self.state["font"] = str(operands[0])
             elif operator in TEXT_SHOW_OPS:
                 self.mangle_text(operands)
+            elif operator in CLIPPING_PATH_OPS:
+                # back up, undo the previous path modification
+                commands[i - 1] = og_commands[i - 1]
             elif operator in BLOCK_BEGIN_OPS:
                 # start of a block, so we need to save a buffer and mangle all at once
                 block = [(operands, operator)]
@@ -268,7 +304,9 @@ class Mangler:
         self.mangle_root()
 
         for page in self.pdf.pages:
+            # store some info about the page itself
             self.state["page"] = page.index
+            self.state["page_diag"] = get_page_diag(page)
 
             # define the character maps of the fonts on the page
             self.define_font_maps(page)
