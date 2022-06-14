@@ -1,6 +1,9 @@
 import os
 import unicodedata
 import random
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Categories from https://unicodebook.readthedocs.io/unicode.html#unicode-categories
 # Default character categories, assuming roman alphabet and punctuation
@@ -81,9 +84,9 @@ def get_font_glyphs(charset):
                 else:
                     glyphs.append(chr(int(name[1:], 16)))
             except ValueError:
-                print(f"Warning: Unknown glyph {name}")
+                logger.warning(f"Unknown glyph {name}")
         else:
-            print(f"Warning: Unknown glyph {name}")
+            logger.warning(f"Unknown glyph {name}")
 
     return glyphs
 
@@ -101,7 +104,7 @@ def replace_text(text: str, char_cats: dict = CHAR_CATS) -> str:
             # otherwise replace with a random character from the same category
             random_text += random.choice(char_cats[cat])
         else:
-            print(f"Warning: Passing through {char} with unknown category {cat}")
+            logger.warning(f"Passing through {char} with unknown category {cat}")
             random_text += char
 
     return random_text

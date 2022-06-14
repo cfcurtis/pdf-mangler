@@ -2,6 +2,8 @@ import sys
 import hashlib
 import random
 import zlib
+import logging
+import time
 
 import pikepdf
 from pdf_mangler.fonts import utils as fu
@@ -26,6 +28,8 @@ MAX_PATH_TWEAK = 18  # 1/4" in PDF units
 BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
 BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
 
+logger = logging.getLogger(__name__)
+
 
 def replace_image(obj: pikepdf.Object) -> None:
     """
@@ -49,7 +53,8 @@ def replace_image(obj: pikepdf.Object) -> None:
 class Mangler:
     def __init__(self, filename: str) -> None:
         self.pdf = pikepdf.Pdf.open(filename)
-        self.state = {"cur_pt": None, "cur_font": "default"}
+        self.create_hash_name()
+        self.state = {"point": None, "font": "default", "page": 0}
         self.font_map = {
             "default": fu.CHAR_CATS,
         }
@@ -99,9 +104,8 @@ class Mangler:
         """
         Creates a new name for the pdf based on the unique ID.
         """
-        hash_name = None
         if "/ID" in self.pdf.trailer.keys():
-            hash_name = hashlib.md5(bytes(self.pdf.trailer.ID[0])).hexdigest()
+            self.hash_name = hashlib.md5(bytes(self.pdf.trailer.ID[0])).hexdigest()
         else:
             # Loop through the objects and concatenate contents, then hash.
             # This ignores metadata and probably doesn't guarantee a consistent ID.
@@ -110,9 +114,9 @@ class Mangler:
                 if "/Contents" in obj.keys():
                     contents += obj.Contents.read_raw_bytes()
 
-            hash_name = hashlib.md5(contents).hexdigest()
+            self.hash_name = hashlib.md5(contents).hexdigest()
 
-        return hash_name + ".pdf"
+        self.hash_name += ".pdf"
 
     def define_font_maps(self, page: pikepdf.Page) -> None:
         """
@@ -125,7 +129,9 @@ class Mangler:
                 # define the map based on the first char and last char
                 self.font_map[name] = fu.map_numeric_range(int(font.FirstChar), int(font.LastChar))
             else:
-                print(f"Font {name} has no CharSet specified, TBD")
+                logger.info(
+                    f"Font {name} on page {self.state['page']} has no CharSet specified, not yet handled"
+                )
 
     def mangle_text(self, operands: list) -> None:
         """
@@ -134,17 +140,17 @@ class Mangler:
         # Replace text with random characters
         if isinstance(operands[0], pikepdf.String):
             operands[0] = pikepdf.String(
-                fu.replace_text(str(operands[0]), self.font_map[self.state["cur_font"]])
+                fu.replace_text(str(operands[0]), self.font_map[self.state["font"]])
             )
         elif isinstance(operands[0], pikepdf.Array):
             for i in range(len(operands[0])):
                 if isinstance(operands[0][i], pikepdf.String):
                     operands[0][i] = pikepdf.String(
-                        fu.replace_text(str(operands[0][i]), self.font_map[self.state["cur_font"]])
+                        fu.replace_text(str(operands[0][i]), self.font_map[self.state["font"]])
                     )
         else:
             # Not sure what this means, so raise a warning if it happens
-            print(f"Warning: unknown operand {operands[0]}")
+            logger.warning(f"Unknown text operand {operands[0]} found on page {self.state['page']}")
 
     def mangle_path(self, operands: list, operator: str) -> list:
         """
@@ -178,9 +184,11 @@ class Mangler:
         """
         if block[0][1] == pikepdf.Operator("BI"):
             # Inline image
-            print("Inline image detected, not yet handled")
+            logger.info(f"Inline image detected on page {self.state['page']}, not yet handled")
         else:
-            print(f"Block starting with {block[0][1]} detected, not yet handled")
+            logger.info(
+                f"Block starting with {block[0][1]} detected on page {self.state['page']}, not yet handled"
+            )
 
     def mangle_content(self, stream: pikepdf.Object) -> bytes:
         """
@@ -193,7 +201,7 @@ class Mangler:
             if block is not None:
                 block.append((operands, operator))
             elif operator == FONT_CHANGE:
-                self.state["cur_font"] = operands[0]
+                self.state["font"] = str(operands[0])
             elif operator in TEXT_SHOW_OPS:
                 self.mangle_text(operands)
             elif operator in BLOCK_BEGIN_OPS:
@@ -233,7 +241,7 @@ class Mangler:
 
         if "/B" in page.keys():
             # Article thread bead, deal with this when we have a good example
-            print("Found an article bead!")
+            logger.info(f"Found an article bead on page {page.index}, not yet handled")
             pass
 
         if "/Annots" in page.keys():
@@ -244,16 +252,24 @@ class Mangler:
                     if "/URI" in annot.A.keys():
                         annot.A.URI = pikepdf.String(fu.replace_text(str(annot.A.URI)))
                     # otherwise if it's an internal link, that's fine
+                else:
+                    logger.info(
+                        f"Found an annotation of type {annot.Subtype} on page {page.index}, not yet handled"
+                    )
 
     def mangle_pdf(self) -> None:
         """
         Mangle the metadata and content of the pdf.
         """
 
+        logger.info(f"Mangling PDF with {len(self.pdf.pages)} pages")
+
         self.strip_metadata()
         self.mangle_root()
 
         for page in self.pdf.pages:
+            self.state["page"] = page.index
+
             # define the character maps of the fonts on the page
             self.define_font_maps(page)
 
@@ -267,20 +283,31 @@ class Mangler:
         """
         Save the mangled pdf.
         """
-        self.pdf.save(self.create_hash_name(), fix_metadata_version=False)
+        self.pdf.save(self.hash_name, fix_metadata_version=False)
 
 
 def main() -> None:
     """
     Main function to create and run the Mangler.
     """
+    if __name__ != "__main__":
+        # if running as a module, log to file
+        logger_handler = logging.FileHandler(filename="pdf_mangler.log")
+        logger_formatter = logging.Formatter("%(levelname)s:%(name)s: %(message)s")
+        logger_handler.setFormatter(logger_formatter)
+        logger.setLevel(logging.INFO)
+        logger.addHandler(logger_handler)
+
     # Load the PDF and strip the metadata
     mglr = Mangler(sys.argv[1])
     mglr.mangle_pdf()
 
     # Save the resulting PDF
     mglr.save()
+    logger.info(f"Time elapsed: {time.process_time():0.2f}s")
+    logger.info(f"Finished mangling PDF with hash name {mglr.hash_name}\n{'*'*80}\n")
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.DEBUG)
     main()
