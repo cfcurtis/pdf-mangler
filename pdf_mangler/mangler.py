@@ -26,22 +26,29 @@ TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
 CLIPPING_PATH_OPS = [pikepdf.Operator(op) for op in ["W", "W*"]]
 MAX_PATH_TWEAK = 0.2  # Percent
+MIN_PATH_TWEAK = 9  # pdf units, 1/8"
 BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
 BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
 
 logger = logging.getLogger(__name__)
 
 
-def get_page_diag(page: pikepdf.Page) -> float:
+def get_page_dims(page: pikepdf.Page) -> float:
     """
-    Checks the various boxes defined on the page and returns the smallest one.
+    Checks the various boxes defined on the page and returns the smallest width, height, and diagonal.
     """
-    diag = float("inf")
+    dims = [float("inf")] * 3
     for key in page.keys():
         if "Box" in key:
-            diag = min(diag, (float(page[key][2]) ** 2 + float(page[key][3]) ** 2) ** 0.5)
+            # Box rectangles are defined differently than drawn rectangles, just to be fun
+            rect = [float(p) for p in page[key]]
+            width = abs(rect[0] - rect[2])
+            height = abs(rect[1] - rect[3])
+            dims[0] = min(dims[0], width)
+            dims[1] = min(dims[1], height)
+            dims[2] = min(dims[2], (width**2 + height**2) ** 0.5)
 
-    return diag
+    return dims
 
 
 def replace_image(obj: pikepdf.Object) -> None:
@@ -67,7 +74,7 @@ class Mangler:
     def __init__(self, filename: str) -> None:
         self.pdf = pikepdf.Pdf.open(filename)
         self.create_hash_name()
-        self.state = {"point": None, "font": "default", "page": 0, "page_diag": 0}
+        self.state = {"point": None, "font": "default", "page": 0, "page_dims": [0, 0, 0]}
         self.font_map = {
             "default": fu.DEFAULT_CATS,
         }
@@ -135,6 +142,11 @@ class Mangler:
         """
         Parses the fonts on the page and defines the character/category mapping
         """
+
+        if "/Resources" not in page.keys() or "/Font" not in page.Resources.keys():
+            # No fonts defined, stick with the default
+            return
+
         for name, font in page.Resources.Font.items():
             if "/FontDescriptor" in font.keys() and "/CharSet" in font.FontDescriptor.keys():
                 self.font_map[name] = fu.map_charset(str(font.FontDescriptor.CharSet))
@@ -192,9 +204,16 @@ class Mangler:
             diag = (operands[2] ** 2 + operands[3] ** 2) ** 0.5
 
             # if the rectangle covers most of the page, don't modify it (likely a border)
-            if diag < self.state["page_diag"] * 0.5:
+            if (
+                operands[2] > self.state["page_dims"][0] * 0.9
+                or operands[3] > self.state["page_dims"][1] * 0.9
+                or diag > self.state["page_dims"][2] * 0.5
+            ):
+                return operands
+            else:
+                max_tweak = max(MIN_PATH_TWEAK, diag * MAX_PATH_TWEAK)
                 for i in range(4):
-                    new_ops[i] = operands[i] + random.random() * diag * MAX_PATH_TWEAK
+                    new_ops[i] = operands[i] + random.random() * max_tweak
         else:
             # Don't know what this is, so raise a warning if it happens
             logger.warning(f"Unknown path operator {operator} found on page {self.state['page']}")
@@ -204,9 +223,18 @@ class Mangler:
                 (operands[new_point_ids[0]] - self.state["point"][0]) ** 2
                 + (operands[new_point_ids[1]] - self.state["point"][1]) ** 2
             ) ** 0.5
-            for id in new_point_ids:
-                new_ops[id] = operands[id] + random.random() * dist * MAX_PATH_TWEAK
-            self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
+            # if the line spans most of the page, don't modify it
+            if (
+                dist > self.state["page_dims"][0] * 0.9
+                or dist > self.state["page_dims"][1] * 0.9
+                or dist > self.state["page_dims"][2] * 0.5
+            ):
+                return operands
+            else:
+                for id in new_point_ids:
+                    max_tweak = max(MIN_PATH_TWEAK, dist * MAX_PATH_TWEAK)
+                    new_ops[id] = operands[id] + random.random() * max_tweak
+                self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
 
         return new_ops
 
@@ -227,6 +255,12 @@ class Mangler:
         Go through the stream instructions and mangle the content.
         Replace text with random characters and distort vector graphics.
         """
+        # store some info about the page itself
+        self.state["page_dims"] = get_page_dims(stream)
+
+        # define the character maps of the fonts on the page
+        self.define_font_maps(stream)
+
         og_commands = pikepdf.parse_content_stream(stream)
         commands = []
         block = None
@@ -304,15 +338,10 @@ class Mangler:
         self.mangle_root()
 
         for page in self.pdf.pages:
-            # store some info about the page itself
             self.state["page"] = page.index
-            self.state["page_diag"] = get_page_diag(page)
-
-            # define the character maps of the fonts on the page
-            self.define_font_maps(page)
 
             # first mangle the contents of the page itself
-            page.Contents.write(self.mangle_content(page))
+            page.Contents = self.pdf.make_stream(self.mangle_content(page))
 
             # then deal with the references
             self.mangle_references(page)
