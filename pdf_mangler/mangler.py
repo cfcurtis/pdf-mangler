@@ -295,8 +295,9 @@ def main() -> None:
         logger_handler = logging.FileHandler(filename="pdf_mangler.log")
         logger_formatter = logging.Formatter("%(levelname)s:%(name)s: %(message)s")
         logger_handler.setFormatter(logger_formatter)
-        logger.setLevel(logging.INFO)
-        logger.addHandler(logger_handler)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+        root_logger.addHandler(logger_handler)
 
     # Load the PDF and strip the metadata
     mglr = Mangler(sys.argv[1])

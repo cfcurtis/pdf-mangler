@@ -11,6 +11,7 @@ DEFAULT_CATS = {
     "Lu": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "Ll": "abcdefghijklmnopqrstuvwxyz",
     "Nd": "0123456789",
+    "default": {},
 }
 # punctuation, mark, separator, or "other"
 PASS_CATS = "PMZCS"
@@ -52,6 +53,14 @@ def categorize_glyphs(glyphs: str) -> dict:
             cats[cat] = char
         else:
             cats[cat] += char
+
+    # create a subset of the categories that are in the default categories
+    cats["default"] = {}
+    for key in cats.keys():
+        if key in DEFAULT_CATS.keys():
+            isect = list(set(cats[key]).intersection(set(DEFAULT_CATS[key])))
+            if len(isect) > 0:
+                cats["default"][key] = isect
 
     return cats
 
@@ -101,8 +110,13 @@ def replace_text(text: str, char_cats: dict = DEFAULT_CATS) -> str:
         if cat[0] in PASS_CATS:
             random_text += char
         elif cat in char_cats.keys():
-            # otherwise replace with a random character from the same category
-            random_text += random.choice(char_cats[cat])
+            if cat in char_cats["default"].keys() and char in char_cats["default"][cat]:
+                # if it's in the default subset, choose one of those
+                # (prevents a lot of random non-roman characters)
+                random_text += random.choice(char_cats["default"][cat])
+            else:
+                # otherwise replace with a random character from the same category
+                random_text += random.choice(char_cats[cat])
         else:
             logger.warning(f"Passing through {char} with unknown category {cat}")
             random_text += char
