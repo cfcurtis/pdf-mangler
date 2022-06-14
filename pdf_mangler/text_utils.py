@@ -5,24 +5,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Categories from https://unicodebook.readthedocs.io/unicode.html#unicode-categories
-# Default character categories, assuming roman alphabet and punctuation
-DEFAULT_CATS = {
-    "Lu": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-    "Ll": "abcdefghijklmnopqrstuvwxyz",
-    "Nd": "0123456789",
-    "default": {
-        "Lu": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-        "Ll": "abcdefghijklmnopqrstuvwxyz",
-        "Nd": "0123456789",
-    },
-}
 # punctuation, mark, separator, or "other"
 PASS_CATS = set("PMZCS")
 
 # Read the glyphlist file and define as a constant
 GLYPHLIST = {}
-with open(os.path.join(os.path.dirname(__file__), "glyphlist.txt"), "r") as f:
+with open(os.path.join(os.path.dirname(__file__), "fonts/glyphlist.txt"), "r") as f:
     for line in f:
         if line.startswith("#"):
             continue
@@ -35,6 +23,31 @@ with open(os.path.join(os.path.dirname(__file__), "glyphlist.txt"), "r") as f:
             GLYPHLIST[pdf_name] = "".join(chr(int(hex, 16)) for hex in unicode_hex.split())
         else:
             GLYPHLIST[pdf_name] = chr(int(unicode_hex, 16))
+
+# Categories from https://unicodebook.readthedocs.io/unicode.html#unicode-categories
+# Default character categories, assuming latin alphabet and punctuation
+# Read the Adobe Latin-1 character set and define as default
+# charsets downloaded from https://github.com/adobe-type-tools/adobe-latin-charsets
+LATIN_1 = {}
+with open(os.path.join(os.path.dirname(__file__), "fonts/adobe-latin-1.txt")) as f:
+    # skip the header line
+    f.readline()
+    for line in f.readlines():
+        char = chr(int(line.split()[0], 16))
+        cat = unicodedata.category(char)
+        if cat[0] in PASS_CATS:
+            continue
+        elif cat not in LATIN_1.keys():
+            LATIN_1[cat] = char
+        else:
+            LATIN_1[cat] += char
+
+LATIN_1["default"] = {
+    # The "default" should really be defined based on the language of the PDF
+    "Lu": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    "Ll": "abcdefghijklmnopqrstuvwxyz",
+    "Nd": "0123456789",
+}
 
 
 def map_charset(charset: str) -> dict:
@@ -64,8 +77,8 @@ def categorize_glyphs(glyphs: str) -> dict:
         if key == "default":
             continue
 
-        if key in DEFAULT_CATS.keys():
-            isect = "".join(set(cats[key]).intersection(set(DEFAULT_CATS[key])))
+        if key in LATIN_1["default"].keys():
+            isect = "".join(set(cats[key]).intersection(set(LATIN_1["default"][key])))
             if len(isect) > 0:
                 cats["default"][key] = isect
 
@@ -107,7 +120,7 @@ def get_font_glyphs(charset):
     return glyphs
 
 
-def replace_text(text: str, char_cats: dict = DEFAULT_CATS) -> str:
+def replace_text(text: str, char_cats: dict = LATIN_1) -> str:
     """
     Replace text with random characters, preserving punctuation,
     case, and numeric type.
@@ -119,7 +132,7 @@ def replace_text(text: str, char_cats: dict = DEFAULT_CATS) -> str:
         elif cat in char_cats.keys():
             if cat in char_cats["default"].keys() and char in char_cats["default"][cat]:
                 # if it's in the default subset, choose one of those
-                # (prevents a lot of random non-roman characters)
+                # (prevents a lot of random non-latin characters)
                 random_text += random.choice(char_cats["default"][cat])
             else:
                 # otherwise replace with a random character from the same category

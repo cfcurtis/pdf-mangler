@@ -101,7 +101,7 @@ class Mangler:
         self.create_hash_name()
         self.state = {"point": None, "font": "default", "page": 0, "page_dims": [0, 0, 0]}
         self.font_map = {
-            "default": tu.DEFAULT_CATS,
+            "default": tu.LATIN_1,
         }
 
     def strip_metadata(self) -> None:
@@ -182,9 +182,8 @@ class Mangler:
                 # define the map based on the first char and last char
                 self.font_map[name] = tu.map_numeric_range(int(font.FirstChar), int(font.LastChar))
             else:
-                logger.info(
-                    f"Font {name} on page {self.state['page']} has no CharSet specified, not yet handled"
-                )
+                # Assume it's Latin-1
+                self.font_map[name] = tu.LATIN_1
 
     def mangle_text(self, operands: list) -> None:
         """
