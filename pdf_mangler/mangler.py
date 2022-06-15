@@ -37,7 +37,6 @@ def get_page_dims(page: pikepdf.Page) -> float:
             height = abs(rect[1] - rect[3])
             dims[0] = min(dims[0], width)
             dims[1] = min(dims[1], height)
-            dims[2] = min(dims[2], (width**2 + height**2) ** 0.5)
 
     return dims
 
@@ -161,43 +160,61 @@ class Mangler:
         """
         if not self.config["mangle"]["outlines"]:
             return
+        try:
+            # replace the title text
+            entry.Title = pikepdf.String(tu.replace_text(str(entry.Title)))
 
-        # replace the title text
-        entry.Title = pikepdf.String(tu.replace_text(str(entry.Title)))
+            # then check for actions
+            for key in entry.keys():
+                if key in ACTION_FIELDS:
+                    self.replace_javascript(entry[key])
 
-        # then check for actions
-        for key in entry.keys():
-            if key in ACTION_FIELDS:
-                self.replace_javascript(entry[key])
+            if "/First" in entry.keys():
+                self.mangle_outlines(entry.First)
+            if "/Next" in entry.keys():
+                self.mangle_outlines(entry.Next)
+        except AttributeError:
+            pass
 
-        if "/First" in entry.keys():
-            self.mangle_outlines(entry.First)
-        if "/Next" in entry.keys():
-            self.mangle_outlines(entry.Next)
+    def mangle_ocg_order(self, oc_list: pikepdf.Array) -> None:
+        """
+        Recursively goes through the OCG order list and mangles any strings.
+        """
+        for i, item in enumerate(oc_list):
+            if isinstance(item, pikepdf.Array):
+                self.mangle_ocg_order(item)
+            elif isinstance(item, pikepdf.String):
+                oc_list[i] = pikepdf.String(tu.replace_text(str(item)))
+
+    def mangle_ocgs(self, oc_props: pikepdf.Object) -> None:
+        """
+        Mangles the names of the OCGs.
+        """
+        if not self.config["mangle"]["ocg_names"]:
+            return
+
+        if "/OCGs" in oc_props.keys():
+            for ocg in oc_props.OCGs:
+                ocg.Name = pikepdf.String(tu.replace_text(str(ocg.Name)))
+
+        if "/D" in oc_props.keys() and "/Order" in oc_props.D.keys():
+            # look for sneaky grouping titles in the order array
+            self.mangle_ocg_order(oc_props.D.Order)
 
     def mangle_root(self) -> None:
         """
         Mangles information from the root, such as OCGs and Outlines.
         """
-        if (
-            self.config["mangle"]["ocg_names"]
-            and "/OCProperties" in self._pdf.Root.keys()
-            and "/OCGs" in self._pdf.Root.OCProperties.keys()
-        ):
-            for ocg in self._pdf.Root.OCProperties.OCGs:
-                ocg.Name = pikepdf.String(tu.replace_text(str(ocg.Name)))
-
         for key in self._pdf.Root.keys():
+            if key == "/OCProperties":
+                self.mangle_ocgs(self._pdf.Root[key])
+
             # replace any javascript actions in the root
-            if key in ACTION_FIELDS:
+            elif key in ACTION_FIELDS:
                 self.replace_javascript(self._pdf.Root[key])
 
-        if (
-            self.config["mangle"]["outlines"]
-            and "/Outlines" in self._pdf.Root.keys()
-            and "/First" in self._pdf.Root.Outlines.keys()
-        ):
-            self.mangle_outlines(self._pdf.Root.Outlines.First)
+            elif key == "/Outlines":
+                self.mangle_outlines(self._pdf.Root[key])
 
     def create_hash_name(self) -> None:
         """
@@ -313,11 +330,12 @@ class Mangler:
             y = abs(operands[new_point_ids[1]] - self.state["point"][1])
             mag = (x**2 + y**2) ** 0.5
 
-            # if the line spans most of the page, don't modify it
+            # if a line is parallel to and spans most of the page, don't modify it
             if (
-                x > self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
-                or y > self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
-                or mag > self.state["page_dims"][2] * self.config["path"]["percent_page_keep"]
+                y < 9
+                and x > self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
+                or x < 9
+                and y > self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
             ):
                 return operands
             else:
