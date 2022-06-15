@@ -229,7 +229,12 @@ class Mangler:
             for obj in self._pdf.objects:
                 try:
                     if "/Contents" in obj.keys():
-                        contents += obj.Contents.read_raw_bytes()
+                        if isinstance(obj.Contents, pikepdf.Array):
+                            # loop through
+                            for stream in obj.Contents:
+                                contents += stream.read_raw_bytes()
+                        else:
+                            contents += obj.Contents.read_raw_bytes()
                 except AttributeError:
                     # no Contents, skip this one
                     pass
