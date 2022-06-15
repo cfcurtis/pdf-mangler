@@ -1,0 +1,38 @@
+mangle:
+  # which components of the PDF to mangle
+  metadata: true
+  content: true
+  # Note: if content is false, then text and path settings are ignored
+  text: true
+  paths: true
+  images: true
+  outlines: true
+  ocg_names: true
+  javascript: true
+  thumbnails: true
+  annotations: true
+
+metadata:
+  # Fields specified in keep will be retained
+  keep:
+    - format
+    - CreatorTool
+    - CreateDate
+    - RenditionClass
+    - StartupProfile
+    - PDFVersion
+    - HasVisibleTransparency
+    - HasVisibleOverprint
+    - CreatorSubTool
+    - Producer
+path:
+  # path tweak parameters.
+  # Vector graphics are modified by randomly shifting control points.
+  # The standard deviation of the shift is the max of min_tweak
+  # in pdf units (points, 1/72") and line length * percent_tweak.
+  percent_tweak: 0.2
+  min_tweak: 18  
+  # Large lines or rectangles are likely borders or other info information
+  # lacking in IP, so they can be skipped, as mangling these leads to visual confusion.
+  # The threshold is in relation to the width/length of the page.
+  percent_page_keep: 0.8

@@ -1,4 +1,6 @@
 import sys
+from pathlib import Path
+import yaml
 import hashlib
 import random
 import zlib
@@ -9,27 +11,13 @@ from tqdm import tqdm
 import pikepdf
 from pdf_mangler import text_utils as tu
 
-KEEP_META = [
-    "format",
-    "CreatorTool",
-    "CreateDate",
-    "RenditionClass",
-    "StartupProfile",
-    "PDFVersion",
-    "HasVisibleTransparency",
-    "HasVisibleOverprint",
-    "CreatorSubTool",
-    "Producer",
-]
-
+DEFAULT_CONFIG = Path(__file__).parent / "defaults.yaml"
 ANNOT_TEXT_FIELDS = ["/T", "/Contents", "/RC", "/Subj", "/Dest", "/CA", "/AC"]
 ACTION_FIELDS = ["/OpenAction", "/A", "/AA", "/URI"]
 FONT_CHANGE = pikepdf.Operator("Tf")
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
 CLIPPING_PATH_OPS = [pikepdf.Operator(op) for op in ["W", "W*"]]
-MAX_PATH_TWEAK = 0.2  # Percent
-MIN_PATH_TWEAK = 18  # pdf units, 1/4"
 BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
 BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
 
@@ -54,44 +42,13 @@ def get_page_dims(page: pikepdf.Page) -> float:
     return dims
 
 
-def replace_image(obj: pikepdf.Object) -> None:
-    """
-    Replaces the image object with a random uniform colour image.
-    Something like kittens would be more fun.
-    """
-    if "/SMask" in obj.keys():
-        replace_image(obj.SMask)
-
-    # inspired by https://github.com/pikepdf/pikepdf/blob/54fea134e09fd75e2602f72f37260016c50def99/tests/test_sanity.py#L63
-    # replace with a random intermediate shade of grey
-    grey = hex(random.randint(100, 200))
-    image_data = bytes(grey, "utf-8") * 3 * obj.Width * obj.Height
-    obj.write(image_data)
-
-
-def replace_javascript(obj: pikepdf.Object) -> None:
-    """
-    Check if an object is javascript, and if so, replace it.
-    """
-    try:
-        if "/JS" in obj.keys():
-            js_string = f'app.alert("Javascript detected in object {obj.objgen}");'
-            # replace with javascript that doesn't really do anything
-            if isinstance(obj.JS, pikepdf.String):
-                obj.JS = pikepdf.String(js_string)
-            elif isinstance(obj.JS, pikepdf.Stream):
-                obj.JS.write(js_string.encode("pdfdoc"))
-        else:
-            # go down a level, javascript is sneaky
-            for key in obj.keys():
-                replace_javascript(obj[key])
-    except AttributeError:
-        # not a dictionary object
-        pass
-
-
 class Mangler:
-    def __init__(self, filename: str = None, pdf: pikepdf.Pdf = None) -> None:
+    def __init__(
+        self,
+        filename: str = None,
+        pdf: pikepdf.Pdf = None,
+        config_file=None,
+    ) -> None:
         """
         Initialize with a new filename or already opened pdf object.
         """
@@ -99,6 +56,18 @@ class Mangler:
             self.filename = filename
         elif pdf:
             self._pdf = pdf
+
+        if not config_file:
+            config_file = DEFAULT_CONFIG
+
+        try:
+            with open(config_file, "r") as f:
+                self.config = yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"Failed loading config file {config_file} with error {e}")
+            logger.info(f"Falling back to defaults")
+            with open(DEFAULT_CONFIG, "r") as f:
+                self.config = yaml.safe_load(f)
 
     @property
     def filename(self) -> str:
@@ -124,10 +93,52 @@ class Mangler:
             "default": tu.LATIN_1,
         }
 
+    def replace_image(self, obj: pikepdf.Object) -> None:
+        """
+        Replaces the image object with a random uniform colour image.
+        Something like kittens would be more fun.
+        """
+        if not self.config["mangle"]["images"]:
+            return
+
+        if "/SMask" in obj.keys():
+            self.replace_image(obj.SMask)
+
+        # inspired by https://github.com/pikepdf/pikepdf/blob/54fea134e09fd75e2602f72f37260016c50def99/tests/test_sanity.py#L63
+        # replace with a random intermediate shade of grey
+        grey = hex(random.randint(100, 200))
+        image_data = bytes(grey, "utf-8") * 3 * obj.Width * obj.Height
+        obj.write(image_data)
+
+    def replace_javascript(self, obj: pikepdf.Object) -> None:
+        """
+        Check if an object is javascript, and if so, replace it.
+        """
+        if not self.config["mangle"]["javascript"]:
+            return
+        try:
+            if "/JS" in obj.keys():
+                js_string = f'app.alert("Javascript detected in object {obj.objgen}");'
+                # replace with javascript that doesn't really do anything
+                if isinstance(obj.JS, pikepdf.String):
+                    obj.JS = pikepdf.String(js_string)
+                elif isinstance(obj.JS, pikepdf.Stream):
+                    obj.JS.write(js_string.encode("pdfdoc"))
+            else:
+                # go down a level, javascript is sneaky
+                for key in obj.keys():
+                    self.replace_javascript(obj[key])
+        except AttributeError:
+            # not a dictionary object
+            pass
+
     def strip_metadata(self) -> None:
         """
         Remove identifying information from the PDF.
         """
+        if not self.config["mangle"]["metadata"]:
+            return
+
         # retain some information from the metadata
         keep = {}
         with self._pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
@@ -148,13 +159,16 @@ class Mangler:
         """
         Recursively mangles the titles of the outline entries
         """
+        if not self.config["mangle"]["outlines"]:
+            return
+
         # replace the title text
         entry.Title = pikepdf.String(tu.replace_text(str(entry.Title)))
 
         # then check for actions
         for key in entry.keys():
             if key in ACTION_FIELDS:
-                replace_javascript(entry[key])
+                self.replace_javascript(entry[key])
 
         if "/First" in entry.keys():
             self.mangle_outlines(entry.First)
@@ -166,7 +180,8 @@ class Mangler:
         Mangles information from the root, such as OCGs and Outlines.
         """
         if (
-            "/OCProperties" in self._pdf.Root.keys()
+            self.config["mangle"]["ocg_names"]
+            and "/OCProperties" in self._pdf.Root.keys()
             and "/OCGs" in self._pdf.Root.OCProperties.keys()
         ):
             for ocg in self._pdf.Root.OCProperties.OCGs:
@@ -175,9 +190,13 @@ class Mangler:
         for key in self._pdf.Root.keys():
             # replace any javascript actions in the root
             if key in ACTION_FIELDS:
-                replace_javascript(self._pdf.Root[key])
+                self.replace_javascript(self._pdf.Root[key])
 
-        if "/Outlines" in self._pdf.Root.keys() and "/First" in self._pdf.Root.Outlines.keys():
+        if (
+            self.config["mangle"]["outlines"]
+            and "/Outlines" in self._pdf.Root.keys()
+            and "/First" in self._pdf.Root.Outlines.keys()
+        ):
             self.mangle_outlines(self._pdf.Root.Outlines.First)
 
     def create_hash_name(self) -> None:
@@ -225,6 +244,9 @@ class Mangler:
         """
         Modifies the text operands.
         """
+        if not self.config["mangle"]["text"]:
+            return
+
         # Replace text with random characters
         if isinstance(operands[0], pikepdf.String):
             operands[0] = pikepdf.String(
@@ -244,6 +266,9 @@ class Mangler:
         """
         Randomly modifies path construction operands to mangle vector graphics.
         """
+        if not self.config["mangle"]["paths"]:
+            return operands
+
         operands = [float(op) for op in operands]
         new_ops = operands.copy()
         new_point_ids = None
@@ -268,13 +293,15 @@ class Mangler:
 
             # if the rectangle covers most of the page, don't modify it (likely a border)
             if (
-                operands[2] > self.state["page_dims"][0] * 0.9
-                or operands[3] > self.state["page_dims"][1] * 0.9
-                or diag > self.state["page_dims"][2] * 0.5
+                operands[2] > self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
+                or operands[3]
+                > self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
             ):
                 return operands
             else:
-                max_tweak = max(MIN_PATH_TWEAK, diag * MAX_PATH_TWEAK)
+                max_tweak = max(
+                    self.config["path"]["min_tweak"], diag * self.config["path"]["percent_tweak"]
+                )
                 for i in range(4):
                     new_ops[i] = operands[i] + random.random() * max_tweak
         else:
@@ -282,20 +309,22 @@ class Mangler:
             logger.warning(f"Unknown path operator {operator} found on page {self.state['page']}")
 
         if new_point_ids is not None:
-            dist = (
-                (operands[new_point_ids[0]] - self.state["point"][0]) ** 2
-                + (operands[new_point_ids[1]] - self.state["point"][1]) ** 2
-            ) ** 0.5
+            x = abs(operands[new_point_ids[0]] - self.state["point"][0])
+            y = abs(operands[new_point_ids[1]] - self.state["point"][1])
+            mag = (x**2 + y**2) ** 0.5
+
             # if the line spans most of the page, don't modify it
             if (
-                dist > self.state["page_dims"][0] * 0.9
-                or dist > self.state["page_dims"][1] * 0.9
-                or dist > self.state["page_dims"][2] * 0.5
+                x > self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
+                or y > self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
+                or mag > self.state["page_dims"][2] * self.config["path"]["percent_page_keep"]
             ):
                 return operands
             else:
                 for id in new_point_ids:
-                    max_tweak = max(MIN_PATH_TWEAK, dist * MAX_PATH_TWEAK)
+                    max_tweak = max(
+                        self.config["path"]["min_tweak"], mag * self.config["path"]["percent_tweak"]
+                    )
                     new_ops[id] = operands[id] + random.random() * max_tweak
                 self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
 
@@ -318,6 +347,12 @@ class Mangler:
         Go through the stream instructions and mangle the content.
         Replace text with random characters and distort vector graphics.
         """
+        if not self.config["mangle"]["content"]:
+            if "/Content" in stream.keys():
+                return stream.Content
+            else:
+                return stream
+
         # store some info about the page itself
         self.state["page_dims"] = get_page_dims(stream)
 
@@ -359,17 +394,17 @@ class Mangler:
             if key == "/Resources" and "/XObject" in page.Resources.keys():
                 for _, xobj in tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False):
                     if xobj.Subtype == "/Image":
-                        replace_image(xobj)
+                        self.replace_image(xobj)
                     elif xobj.Subtype == "/Form":
                         xobj.write(self.mangle_content(xobj))
                         # forms might recursively reference other forms
                         self.mangle_references(xobj)
 
-            elif key == "/Thumb":
+            elif key == "/Thumb" and self.config["mangle"]["thumbnails"]:
                 # just delete the thumbnail, can't seem to parse the image
                 del page.Thumb
 
-            elif key == "/PieceInfo":
+            elif key == "/PieceInfo" and self.config["mangle"]["metadata"]:
                 # Delete the PieceInfo, it can be hiding PII metadata
                 del page.PieceInfo
 
@@ -378,7 +413,7 @@ class Mangler:
                 logger.info(f"Found an article bead on page {page.index}, not yet handled")
                 pass
 
-            elif key == "/Annots":
+            elif key == "/Annots" and self.config.mangle["annotations"]:
                 # annotations
                 for annot in page.Annots:
                     if annot.Subtype == "/Link":
@@ -392,10 +427,10 @@ class Mangler:
                             if key in ANNOT_TEXT_FIELDS:
                                 annot[key] = pikepdf.String(tu.replace_text(str(annot[key])))
                             elif key in ACTION_FIELDS:
-                                replace_javascript(annot[key])
+                                self.replace_javascript(annot[key])
 
             elif key in ACTION_FIELDS:
-                replace_javascript(page[key])
+                self.replace_javascript(page[key])
 
     def mangle_pdf(self) -> None:
         """
@@ -446,7 +481,11 @@ def main(log_level: int = logging.INFO, show_output: bool = False) -> None:
         root_logger.addHandler(stdout_handler)
 
     # Load the PDF, mangle, and save
-    mglr = Mangler(sys.argv[1])
+    config_file = None
+    if len(sys.argv) > 2:
+        config_file = sys.argv[2]
+
+    mglr = Mangler(sys.argv[1], config_file)
     mglr.mangle_pdf()
     mglr.save()
 
