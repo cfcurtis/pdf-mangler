@@ -363,7 +363,7 @@ class Mangler:
         Recursively go through any references on the page and mangle those
         """
         for key in page.keys():
-            if key == "Resources" and "/XObject" in page.Resources.keys():
+            if key == "/Resources" and "/XObject" in page.Resources.keys():
                 for _, xobj in tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False):
                     if xobj.Subtype == "/Image":
                         replace_image(xobj)
