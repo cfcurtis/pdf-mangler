@@ -85,7 +85,7 @@ def replace_javascript(obj: pikepdf.Object) -> None:
             # go down a level, javascript is sneaky
             for key in obj.keys():
                 replace_javascript(obj[key])
-    except pikepdf.PdfError:
+    except AttributeError:
         # not a dictionary object
         pass
 
@@ -191,8 +191,12 @@ class Mangler:
             # This ignores metadata and probably doesn't guarantee a consistent ID.
             contents = b""
             for obj in self._pdf.objects:
-                if "/Contents" in obj.keys():
-                    contents += obj.Contents.read_raw_bytes()
+                try:
+                    if "/Contents" in obj.keys():
+                        contents += obj.Contents.read_raw_bytes()
+                except AttributeError:
+                    # no Contents, skip this one
+                    pass
 
             self.hash_name = hashlib.md5(contents).hexdigest()
 
@@ -397,13 +401,13 @@ class Mangler:
         """
         Mangle the metadata and content of the pdf.
         """
-
-        logger.info(f"Mangling PDF with {len(self._pdf.pages)} pages")
+        start = time.process_time()
+        info_str = f"Mangling PDF with {len(self._pdf.pages)} pages"
+        logger.info(info_str)
+        print(info_str)
 
         self.strip_metadata()
         self.mangle_root()
-
-        print(f"Mangling PDF with {len(self._pdf.pages)} pages")
         for page in tqdm(self._pdf.pages, desc="Pages"):
             self.state["page"] = page.index
 
@@ -412,6 +416,13 @@ class Mangler:
 
             # then deal with the references
             self.mangle_references(page)
+
+        info_str = (
+            f"Time elapsed: {time.process_time() - start:0.2f}s\n"
+            f"Finished mangling PDF with hash name {self.hash_name}"
+        )
+        logger.info(info_str + f"\n{'*'*80}\n")
+        print(info_str)
 
     def save(self) -> None:
         """
@@ -438,13 +449,6 @@ def main(log_level: int = logging.INFO, show_output: bool = False) -> None:
     mglr = Mangler(sys.argv[1])
     mglr.mangle_pdf()
     mglr.save()
-
-    info_str = (
-        f"Time elapsed: {time.process_time():0.2f}s\n"
-        f"Finished mangling PDF with hash name {mglr.hash_name}"
-    )
-    print(info_str)
-    logger.info(info_str + f"\n{'*'*80}\n")
 
 
 if __name__ == "__main__":
