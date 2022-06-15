@@ -417,10 +417,13 @@ class Mangler:
                 # annotations
                 for annot in page.Annots:
                     if annot.Subtype == "/Link":
-                        # mangle the URI
-                        if "/URI" in annot.A.keys():
-                            annot.A.URI = pikepdf.String(tu.replace_text(str(annot.A.URI)))
-                        # otherwise if it's an internal link, that's fine
+                        try:
+                            # mangle the URI
+                            if "/URI" in annot.A.keys():
+                                annot.A.URI = pikepdf.String(tu.replace_text(str(annot.A.URI)))
+                            # otherwise if it's an internal link, that's fine
+                        except AttributeError:
+                            pass
                     else:
                         # replace all text strings and javascript in the annotation
                         for key in annot.keys():
