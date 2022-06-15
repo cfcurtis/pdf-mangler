@@ -420,24 +420,23 @@ class Mangler:
         self._pdf.save(self.hash_name, fix_metadata_version=False)
 
 
-def main() -> None:
+def main(log_level: int = logging.INFO, show_output: bool = False) -> None:
     """
     Main function to create and run the Mangler.
     """
-    if __name__ != "__main__":
-        # if running as a module, log to file
-        logger_handler = logging.FileHandler(filename="pdf_mangler.log")
-        logger_formatter = logging.Formatter("%(levelname)s:%(name)s: %(message)s")
-        logger_handler.setFormatter(logger_formatter)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.INFO)
-        root_logger.addHandler(logger_handler)
+    # configure the log file, if it's not already done
+    root_logger = logging.getLogger()
+    if not root_logger.hasHandlers():
+        logging.basicConfig(filename="pdf_mangler.log", encoding="utf-8", level=log_level)
 
-    # Load the PDF and strip the metadata
+    if show_output:
+        # also log to stdout
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        root_logger.addHandler(stdout_handler)
+
+    # Load the PDF, mangle, and save
     mglr = Mangler(sys.argv[1])
     mglr.mangle_pdf()
-
-    # Save the resulting PDF
     mglr.save()
 
     info_str = (
@@ -449,5 +448,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.DEBUG)
-    main()
+    main(log_level=logging.DEBUG, show_output=True)

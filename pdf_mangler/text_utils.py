@@ -113,9 +113,9 @@ def get_font_glyphs(charset):
                 else:
                     glyphs.append(chr(int(name[1:], 16)))
             except ValueError:
-                logger.warning(f"Unknown glyph {name}")
+                logger.warning(f"Unknown glyph name {name}")
         else:
-            logger.warning(f"Unknown glyph {name}")
+            logger.warning(f"Unknown glyph name {name}")
 
     return glyphs
 
