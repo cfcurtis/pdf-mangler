@@ -450,8 +450,13 @@ def main() -> None:
 
     # Save the resulting PDF
     mglr.save()
-    logger.info(f"Time elapsed: {time.process_time():0.2f}s")
-    logger.info(f"Finished mangling PDF with hash name {mglr.hash_name}\n{'*'*80}\n")
+
+    info_str = (
+        f"Time elapsed: {time.process_time():0.2f}s\n"
+        f"Finished mangling PDF with hash name {mglr.hash_name}"
+    )
+    print(info_str)
+    logger.info(info_str + f"\n{'*'*80}\n")
 
 
 if __name__ == "__main__":
