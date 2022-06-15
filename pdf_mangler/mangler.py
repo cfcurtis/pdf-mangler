@@ -292,7 +292,6 @@ class Mangler:
             return operands
 
         operands = [float(op) for op in operands]
-        new_ops = operands.copy()
         new_point_ids = None
 
         if operator == "m":
@@ -319,13 +318,14 @@ class Mangler:
                 or operands[3]
                 > self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
             ):
-                return operands
+                # we don't need to update the previous point because re doesn't modify it
+                pass
             else:
                 max_tweak = max(
                     self.config["path"]["min_tweak"], diag * self.config["path"]["percent_tweak"]
                 )
                 for i in range(4):
-                    new_ops[i] = operands[i] + random.random() * max_tweak
+                    operands[i] = operands[i] + random.random() * max_tweak
         else:
             # Don't know what this is, so raise a warning if it happens
             logger.warning(f"Unknown path operator {operator} found on page {self.state['page']}")
@@ -335,6 +335,9 @@ class Mangler:
             y = abs(operands[new_point_ids[1]] - self.state["point"][1])
             mag = (x**2 + y**2) ** 0.5
 
+            # update the previous point
+            self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
+
             # if a line is parallel to and spans most of the page, don't modify it
             if (
                 y < 9
@@ -342,16 +345,15 @@ class Mangler:
                 or x < 9
                 and y > self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
             ):
-                return operands
+                pass
             else:
+                max_tweak = max(
+                    self.config["path"]["min_tweak"], mag * self.config["path"]["percent_tweak"]
+                )
                 for id in new_point_ids:
-                    max_tweak = max(
-                        self.config["path"]["min_tweak"], mag * self.config["path"]["percent_tweak"]
-                    )
-                    new_ops[id] = operands[id] + random.random() * max_tweak
-                self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
+                    operands[id] = operands[id] + random.random() * max_tweak
 
-        return new_ops
+        return operands
 
     def mangle_block(self, block: list) -> None:
         """

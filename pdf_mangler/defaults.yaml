@@ -35,4 +35,4 @@ path:
   # Large lines or rectangles are likely borders or other info information
   # lacking in IP, so they can be skipped, as mangling these leads to visual confusion.
   # The threshold is in relation to the width/length of the page.
-  percent_page_keep: 0.8
+  percent_page_keep: 0.75
