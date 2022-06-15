@@ -23,6 +23,7 @@ KEEP_META = [
 ]
 
 ANNOT_TEXT_FIELDS = ["/T", "/Contents", "/RC", "/Subj", "/Dest", "/CA", "/AC"]
+ACTION_FIELDS = ["/OpenAction", "/A", "/AA", "/URI"]
 FONT_CHANGE = pikepdf.Operator("Tf")
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
@@ -81,26 +82,23 @@ def replace_image(obj: pikepdf.Object) -> None:
 
 def replace_javascript(obj: pikepdf.Object) -> None:
     """
-    Look for javascript and replace strings.
+    Check if an object is javascript, and if so, replace it.
     """
-    if not (isinstance(obj, pikepdf.Dictionary) or isinstance(obj, pikepdf.Page)):
-        return
-
-    is_js = False
-    for key in obj.keys():
-        if key == "/S" and obj[key] == "/JavaScript":
-            is_js = True
-
-    if is_js:
-        js_string = f'app.alert("Javascript detected in object {obj.objgen}");'
-        # replace with javascript that doesn't really do anything
-        if isinstance(obj.JS, pikepdf.String):
-            obj.JS = pikepdf.String(js_string)
-        elif isinstance(obj.JS, pikepdf.Stream):
-            obj.JS.write(js_string.encode("pdfdoc"))
-    else:
-        for key in obj.keys():
-            replace_javascript(obj[key])
+    try:
+        if "/JS" in obj.keys():
+            js_string = f'app.alert("Javascript detected in object {obj.objgen}");'
+            # replace with javascript that doesn't really do anything
+            if isinstance(obj.JS, pikepdf.String):
+                obj.JS = pikepdf.String(js_string)
+            elif isinstance(obj.JS, pikepdf.Stream):
+                obj.JS.write(js_string.encode("pdfdoc"))
+        else:
+            # go down a level, javascript is sneaky
+            for key in obj.keys():
+                replace_javascript(obj[key])
+    except pikepdf.PdfError:
+        # not a dictionary object
+        pass
 
 
 class Mangler:
@@ -161,7 +159,14 @@ class Mangler:
         """
         Recursively mangles the titles of the outline entries
         """
+        # replace the title text
         entry.Title = pikepdf.String(tu.replace_text(str(entry.Title)))
+
+        # then check for actions
+        for key in entry.keys():
+            if key in ACTION_FIELDS:
+                replace_javascript(entry[key])
+
         if "/First" in entry.keys():
             self.mangle_outlines(entry.First)
         if "/Next" in entry.keys():
@@ -178,7 +183,12 @@ class Mangler:
             for ocg in self._pdf.Root.OCProperties.OCGs:
                 ocg.Name = pikepdf.String(tu.replace_text(str(ocg.Name)))
 
-        if "/Outlines" in self._pdf.Root.keys():
+        for key in self._pdf.Root.keys():
+            # replace any javascript actions in the root
+            if key in ACTION_FIELDS:
+                replace_javascript(self._pdf.Root[key])
+
+        if "/Outlines" in self._pdf.Root.keys() and "/First" in self._pdf.Root.Outlines.keys():
             self.mangle_outlines(self._pdf.Root.Outlines.First)
 
     def create_hash_name(self) -> None:
@@ -352,43 +362,47 @@ class Mangler:
         """
         Recursively go through any references on the page and mangle those
         """
-        replace_javascript(page)
+        for key in page.keys():
+            if key == "Resources" and "/XObject" in page.Resources.keys():
+                for _, xobj in tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False):
+                    if xobj.Subtype == "/Image":
+                        replace_image(xobj)
+                    elif xobj.Subtype == "/Form":
+                        xobj.write(self.mangle_content(xobj))
+                        # forms might recursively reference other forms
+                        self.mangle_references(xobj)
 
-        if "/Resources" in page.keys() and "/XObject" in page.Resources.keys():
-            for _, xobj in tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False):
-                if xobj.Subtype == "/Image":
-                    replace_image(xobj)
-                elif xobj.Subtype == "/Form":
-                    xobj.write(self.mangle_content(xobj))
-                    # forms might recursively reference other forms
-                    self.mangle_references(xobj)
+            elif key == "/Thumb":
+                # just delete the thumbnail, can't seem to parse the image
+                del page.Thumb
 
-        if "/Thumb" in page.keys():
-            # just delete the thumbnail, can't seem to parse the image
-            del page.Thumb
+            elif key == "/PieceInfo":
+                # Delete the PieceInfo, it can be hiding PII metadata
+                del page.PieceInfo
 
-        if "/PieceInfo" in page.keys():
-            # Delete the PieceInfo, it can be hiding PII metadata
-            del page.PieceInfo
+            elif key == "/B":
+                # Article thread bead, deal with this when we have a good example
+                logger.info(f"Found an article bead on page {page.index}, not yet handled")
+                pass
 
-        if "/B" in page.keys():
-            # Article thread bead, deal with this when we have a good example
-            logger.info(f"Found an article bead on page {page.index}, not yet handled")
-            pass
+            elif key == "/Annots":
+                # annotations
+                for annot in page.Annots:
+                    if annot.Subtype == "/Link":
+                        # mangle the URI
+                        if "/URI" in annot.A.keys():
+                            annot.A.URI = pikepdf.String(tu.replace_text(str(annot.A.URI)))
+                        # otherwise if it's an internal link, that's fine
+                    else:
+                        # replace all text strings and javascript in the annotation
+                        for key in annot.keys():
+                            if key in ANNOT_TEXT_FIELDS:
+                                annot[key] = pikepdf.String(tu.replace_text(str(annot[key])))
+                            elif key in ACTION_FIELDS:
+                                replace_javascript(annot[key])
 
-        if "/Annots" in page.keys():
-            # annotations
-            for annot in page.Annots:
-                if annot.Subtype == "/Link":
-                    # mangle the URI
-                    if "/URI" in annot.A.keys():
-                        annot.A.URI = pikepdf.String(tu.replace_text(str(annot.A.URI)))
-                    # otherwise if it's an internal link, that's fine
-                else:
-                    # replace all text strings in the annotation
-                    for key in annot.keys():
-                        if key in ANNOT_TEXT_FIELDS:
-                            annot[key] = pikepdf.String(tu.replace_text(str(annot[key])))
+            elif key in ACTION_FIELDS:
+                replace_javascript(page[key])
 
     def mangle_pdf(self) -> None:
         """

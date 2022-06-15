@@ -18,7 +18,7 @@ def test_hash_name():
     assert mglr.hash_name == "610f592b04350db727f5a24f37342262.pdf"
 
 
-def test_integration():
+def test_reuse_object():
     mglr = mangler.Mangler("sunny_mountain_overalls.pdf")
     mglr.mangle_pdf()
     mglr.save()
@@ -33,3 +33,11 @@ def test_integration():
 def test_nonexistant_filename():
     with pytest.raises(FileNotFoundError):
         mglr = mangler.Mangler("nonexistant_file.pdf")
+
+
+def test_javascript():
+    # javascript.pdf from https://github.com/openpreserve/format-corpus/tree/master/pdfCabinetOfHorrors
+    mglr = mangler.Mangler("javascript.pdf")
+    mglr.mangle_pdf()
+    mglr.save()
+    assert os.path.exists(mglr.hash_name)

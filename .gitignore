@@ -166,3 +166,4 @@ cython_debug/
 *.pdf
 !sunny_mountain_overalls.pdf
 !sample-sigconf.pdf
+!javascript.pdf

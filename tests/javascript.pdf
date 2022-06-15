@@ -1,0 +1,81 @@
+%PDF-1.1
+%‚„œ”
+1 0 obj 
+<<
+/OpenAction 2 0 R
+/Type /Catalog
+/Outlines 3 0 R
+/Pages 4 0 R
+>>
+endobj 
+3 0 obj 
+<<
+/Type /Outlines
+/Count 0
+>>
+endobj 
+4 0 obj 
+<<
+/Kids [5 0 R]
+/Type /Pages
+/Count 1
+>>
+endobj 
+5 0 obj 
+<<
+/Contents 6 0 R
+/Type /Page
+/Resources 
+<<
+/ProcSet [/PDF /Text]
+/Font 
+<<
+/F1 7 0 R
+>>
+>>
+/Parent 4 0 R
+/MediaBox [0 0 612 792]
+>>
+endobj 
+6 0 obj 
+<<
+/Length 56
+>>
+stream
+BT /F1 12 Tf 100 700 Td 15 TL (JavaScript example) Tj ET
+endstream 
+endobj 
+7 0 obj 
+<<
+/Name /F1
+/Subtype /Type1
+/Type /Font
+/BaseFont /Helvetica
+/Encoding /MacRomanEncoding
+>>
+endobj 
+2 0 obj 
+<<
+/S /JavaScript
+/Type /Action
+/JS (app.alert\({cMsg: 'Hello from PDF JavaScript', cTitle: 'Testing PDF JavaScript', nIcon: 3}\);)
+>>
+endobj xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000578 00000 n 
+0000000100 00000 n 
+0000000148 00000 n 
+0000000207 00000 n 
+0000000359 00000 n 
+0000000468 00000 n 
+trailer
+
+<<
+/Root 1 0 R
+/Size 8
+>>
+startxref
+729
+%%EOF
