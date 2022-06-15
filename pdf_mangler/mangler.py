@@ -22,6 +22,7 @@ KEEP_META = [
     "Producer",
 ]
 
+ANNOT_TEXT_FIELDS = ["/T", "/Contents", "/RC", "/Subj", "/Dest", "/CA", "/AC"]
 FONT_CHANGE = pikepdf.Operator("Tf")
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
@@ -78,6 +79,30 @@ def replace_image(obj: pikepdf.Object) -> None:
     obj.write(zlib.compress(pil_img.tobytes()), filter=pikepdf.Name("/FlateDecode"))
 
 
+def replace_javascript(obj: pikepdf.Object) -> None:
+    """
+    Look for javascript and replace strings.
+    """
+    if not (isinstance(obj, pikepdf.Dictionary) or isinstance(obj, pikepdf.Page)):
+        return
+
+    is_js = False
+    for key in obj.keys():
+        if key == "/S" and obj[key] == "/JavaScript":
+            is_js = True
+
+    if is_js:
+        js_string = f'app.alert("Javascript detected in object {obj.objgen}");'
+        # replace with javascript that doesn't really do anything
+        if isinstance(obj.JS, pikepdf.String):
+            obj.JS = pikepdf.String(js_string)
+        elif isinstance(obj.JS, pikepdf.Stream):
+            obj.JS.write(js_string.encode("pdfdoc"))
+    else:
+        for key in obj.keys():
+            replace_javascript(obj[key])
+
+
 class Mangler:
     def __init__(self, filename: str = None, pdf: pikepdf.Pdf = None) -> None:
         """
@@ -116,7 +141,7 @@ class Mangler:
         """
         Remove identifying information from the PDF.
         """
-        # retain information on creator tool
+        # retain some information from the metadata
         keep = {}
         with self._pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
             for key in meta.keys():
@@ -327,6 +352,8 @@ class Mangler:
         """
         Recursively go through any references on the page and mangle those
         """
+        replace_javascript(page)
+
         if "/Resources" in page.keys() and "/XObject" in page.Resources.keys():
             for _, xobj in tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False):
                 if xobj.Subtype == "/Image":
@@ -358,9 +385,10 @@ class Mangler:
                         annot.A.URI = pikepdf.String(tu.replace_text(str(annot.A.URI)))
                     # otherwise if it's an internal link, that's fine
                 else:
-                    logger.info(
-                        f"Found an annotation of type {annot.Subtype} on page {page.index}, not yet handled"
-                    )
+                    # replace all text strings in the annotation
+                    for key in annot.keys():
+                        if key in ANNOT_TEXT_FIELDS:
+                            annot[key] = pikepdf.String(tu.replace_text(str(annot[key])))
 
     def mangle_pdf(self) -> None:
         """
