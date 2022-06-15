@@ -62,22 +62,11 @@ def replace_image(obj: pikepdf.Object) -> None:
     if "/SMask" in obj.keys():
         replace_image(obj.SMask)
 
-    # replacing image code adapted from https://pikepdf.readthedocs.io/en/latest/topics/images.html
-    pdfimg = pikepdf.PdfImage(obj)
-    try:
-        pil_img = pdfimg.as_pil_image()
-    except pikepdf.PdfError:
-        logger.warning(f"Could not convert image {obj.objgen} to PIL image")
-        return
-
-    # copy a random pixel value to all pixels
-    pix = pil_img.getpixel(
-        (random.randint(0, pdfimg.width - 1), random.randint(0, pdfimg.height - 1))
-    )
-    pil_img.putdata([pix] * (pdfimg.width * pdfimg.height))
-
-    # write it back to the image object
-    obj.write(zlib.compress(pil_img.tobytes()), filter=pikepdf.Name("/FlateDecode"))
+    # inspired by https://github.com/pikepdf/pikepdf/blob/54fea134e09fd75e2602f72f37260016c50def99/tests/test_sanity.py#L63
+    # replace with a random intermediate shade of grey
+    grey = hex(random.randint(100, 200))
+    image_data = bytes(grey, "utf-8") * 3 * obj.Width * obj.Height
+    obj.write(image_data)
 
 
 def replace_javascript(obj: pikepdf.Object) -> None:
