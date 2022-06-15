@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import pytest
 import warnings
 
@@ -7,7 +8,7 @@ warnings.filterwarnings("error")
 from pdf_mangler import mangler
 
 # set the cwd to the tests directory
-os.chdir(os.path.dirname(os.path.realpath(__file__)))
+os.chdir(Path(__file__).parent)
 
 
 def test_hash_name():

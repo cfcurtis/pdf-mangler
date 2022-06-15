@@ -143,7 +143,7 @@ class Mangler:
         keep = {}
         with self._pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
             for key in meta.keys():
-                if any([field in key for field in KEEP_META]):
+                if any([field in key for field in self.config["metadata"]["keep"]]):
                     keep[key] = meta[key]
 
         # obliterate the rest
@@ -413,7 +413,7 @@ class Mangler:
                 logger.info(f"Found an article bead on page {page.index}, not yet handled")
                 pass
 
-            elif key == "/Annots" and self.config.mangle["annotations"]:
+            elif key == "/Annots" and self.config["mangle"]["annotations"]:
                 # annotations
                 for annot in page.Annots:
                     if annot.Subtype == "/Link":
