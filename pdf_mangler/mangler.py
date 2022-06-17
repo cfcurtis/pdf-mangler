@@ -6,6 +6,8 @@ import random
 import zlib
 import logging
 import time
+from decimal import Decimal
+from math import sqrt
 from tqdm import tqdm
 
 import pikepdf
@@ -291,14 +293,14 @@ class Mangler:
         if not self.config["mangle"]["paths"]:
             return operands
 
-        operands = [float(op) for op in operands]
         new_point_ids = None
 
         if operator == "m":
             # single point to start/end path
             if self.config["path"]["tweak_start"]:
                 operands = [
-                    op + random.random() * (self.config["path"]["min_tweak"]) for op in operands
+                    op + Decimal(random.random() * (self.config["path"]["min_tweak"]))
+                    for op in operands
                 ]
             self.state["point"] = (operands[0], operands[1])
         elif operator == "l":
@@ -314,7 +316,7 @@ class Mangler:
             new_point_ids = (2, 3)
         elif operator == "re":
             # rectangle, handle it separately
-            diag = (operands[2] ** 2 + operands[3] ** 2) ** 0.5
+            diag = sqrt(operands[2] ** 2 + operands[3] ** 2)
 
             # if the rectangle covers most of the page, don't modify it (likely a border)
             if (
@@ -326,7 +328,7 @@ class Mangler:
                 max_tweak = max(
                     self.config["path"]["min_tweak"], diag * self.config["path"]["percent_tweak"]
                 )
-                operands = [op + random.random() * max_tweak for op in operands]
+                operands = [op + Decimal(random.random() * max_tweak) for op in operands]
         else:
             # Don't know what this is, so raise a warning if it happens
             logger.warning(f"Unknown path operator {operator} found on page {self.state['page']}")
@@ -334,23 +336,21 @@ class Mangler:
         if new_point_ids is not None:
             x = abs(operands[new_point_ids[0]] - self.state["point"][0])
             y = abs(operands[new_point_ids[1]] - self.state["point"][1])
-            mag = (x**2 + y**2) ** 0.5
+            mag = sqrt(x**2 + y**2)
 
             # update the previous point
             self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
 
             # if a line is parallel to and spans most of the page, don't modify it
-            if not (
-                y < 9
-                and x > self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
-                or x < 9
+            if (
+                x < self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
                 and y > self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
             ):
                 max_tweak = max(
                     self.config["path"]["min_tweak"], mag * self.config["path"]["percent_tweak"]
                 )
                 for id in new_point_ids:
-                    operands[id] = operands[id] + random.random() * max_tweak
+                    operands[id] = operands[id] + Decimal(random.random() * max_tweak)
 
         return operands
 
@@ -404,7 +404,7 @@ class Mangler:
                 self.mangle_block(block)
                 block = None
             elif operator in PATH_CONSTRUCTION_OPS:
-                operands = self.mangle_path(operands, str(operator))
+                operands = self.mangle_path(list(operands), str(operator))
 
             commands.append((operands, operator))
 
