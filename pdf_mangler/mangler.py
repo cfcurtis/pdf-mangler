@@ -295,7 +295,11 @@ class Mangler:
         new_point_ids = None
 
         if operator == "m":
-            # single point to start/end path, don't modify
+            # single point to start/end path
+            if self.config["path"]["tweak_start"]:
+                operands = [
+                    op + random.random() * (self.config["path"]["min_tweak"]) for op in operands
+                ]
             self.state["point"] = (operands[0], operands[1])
         elif operator == "l":
             # end of a path
@@ -314,18 +318,15 @@ class Mangler:
 
             # if the rectangle covers most of the page, don't modify it (likely a border)
             if (
-                operands[2] > self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
-                or operands[3]
-                > self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
+                operands[2] < self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
+                and operands[3]
+                < self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
             ):
                 # we don't need to update the previous point because re doesn't modify it
-                pass
-            else:
                 max_tweak = max(
                     self.config["path"]["min_tweak"], diag * self.config["path"]["percent_tweak"]
                 )
-                for i in range(4):
-                    operands[i] = operands[i] + random.random() * max_tweak
+                operands = [op + random.random() * max_tweak for op in operands]
         else:
             # Don't know what this is, so raise a warning if it happens
             logger.warning(f"Unknown path operator {operator} found on page {self.state['page']}")
@@ -339,14 +340,12 @@ class Mangler:
             self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
 
             # if a line is parallel to and spans most of the page, don't modify it
-            if (
+            if not (
                 y < 9
                 and x > self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
                 or x < 9
                 and y > self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
             ):
-                pass
-            else:
                 max_tweak = max(
                     self.config["path"]["min_tweak"], mag * self.config["path"]["percent_tweak"]
                 )

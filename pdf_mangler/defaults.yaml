@@ -36,3 +36,5 @@ path:
   # lacking in IP, so they can be skipped, as mangling these leads to visual confusion.
   # The threshold is in relation to the width/length of the page.
   percent_page_keep: 0.75
+  # Modify the start of paths as well as ends (more chaotic)
+  tweak_start: true
