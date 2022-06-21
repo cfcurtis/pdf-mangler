@@ -399,15 +399,10 @@ class Mangler:
         for key in page.keys():
             if key == "/Resources" and "/XObject" in page.Resources.keys():
                 for _, xobj in tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False):
-                    if xobj.Subtype == "/Image":
-                        pass
-                    elif xobj.Subtype == "/Form":
+                    if xobj.Subtype == "/Form":
                         xobj.write(self.mangle_content(xobj))
                         # forms might recursively reference other forms
                         self.mangle_references(xobj)
-                    else:
-                        print(xobj.Subtype)
-                        pass
 
             elif key == "/Thumb" and self.config["mangle"]["thumbnails"]:
                 # just delete the thumbnail, can't seem to parse the image
