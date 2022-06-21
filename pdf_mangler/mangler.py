@@ -15,7 +15,6 @@ from pdf_mangler import text_utils as tu
 
 DEFAULT_CONFIG = Path(__file__).parent / "defaults.yaml"
 ANNOT_TEXT_FIELDS = ["/T", "/Contents", "/RC", "/Subj", "/Dest", "/CA", "/AC"]
-ACTION_FIELDS = ["/OpenAction", "/A", "/AA", "/URI"]
 FONT_CHANGE = pikepdf.Operator("Tf")
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
@@ -117,21 +116,13 @@ class Mangler:
         """
         if not self.config["mangle"]["javascript"]:
             return
-        try:
-            if "/JS" in obj.keys():
-                js_string = f'app.alert("Javascript detected in object {obj.objgen}");'
-                # replace with javascript that doesn't really do anything
-                if isinstance(obj.JS, pikepdf.String):
-                    obj.JS = pikepdf.String(js_string)
-                elif isinstance(obj.JS, pikepdf.Stream):
-                    obj.JS.write(js_string.encode("pdfdoc"))
-            else:
-                # go down a level, javascript is sneaky
-                for key in obj.keys():
-                    self.replace_javascript(obj[key])
-        except AttributeError:
-            # not a dictionary object
-            pass
+
+        js_string = f'app.alert("Javascript detected in object {obj.objgen}");'
+        # replace with javascript that doesn't really do anything
+        if isinstance(obj.JS, pikepdf.String):
+            obj.JS = pikepdf.String(js_string)
+        elif isinstance(obj.JS, pikepdf.Stream):
+            obj.JS.write(js_string.encode("pdfdoc"))
 
     def strip_metadata(self) -> None:
         """
@@ -165,11 +156,6 @@ class Mangler:
         try:
             # replace the title text
             entry.Title = pikepdf.String(tu.replace_text(str(entry.Title)))
-
-            # then check for actions
-            for key in entry.keys():
-                if key in ACTION_FIELDS:
-                    self.replace_javascript(entry[key])
 
             if "/First" in entry.keys():
                 self.mangle_outlines(entry.First)
@@ -210,10 +196,6 @@ class Mangler:
         for key in self._pdf.Root.keys():
             if key == "/OCProperties":
                 self.mangle_ocgs(self._pdf.Root[key])
-
-            # replace any javascript actions in the root
-            elif key in ACTION_FIELDS:
-                self.replace_javascript(self._pdf.Root[key])
 
             elif key == "/Outlines":
                 self.mangle_outlines(self._pdf.Root[key])
@@ -418,11 +400,14 @@ class Mangler:
             if key == "/Resources" and "/XObject" in page.Resources.keys():
                 for _, xobj in tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False):
                     if xobj.Subtype == "/Image":
-                        self.replace_image(xobj)
+                        pass
                     elif xobj.Subtype == "/Form":
                         xobj.write(self.mangle_content(xobj))
                         # forms might recursively reference other forms
                         self.mangle_references(xobj)
+                    else:
+                        print(xobj.Subtype)
+                        pass
 
             elif key == "/Thumb" and self.config["mangle"]["thumbnails"]:
                 # just delete the thumbnail, can't seem to parse the image
@@ -449,15 +434,24 @@ class Mangler:
                         except AttributeError:
                             pass
                     else:
-                        # replace all text strings and javascript in the annotation
+                        # replace all text strings
                         for key in annot.keys():
                             if key in ANNOT_TEXT_FIELDS:
                                 annot[key] = pikepdf.String(tu.replace_text(str(annot[key])))
-                            elif key in ACTION_FIELDS:
-                                self.replace_javascript(annot[key])
 
-            elif key in ACTION_FIELDS:
-                self.replace_javascript(page[key])
+    def mangle_objects(self) -> None:
+        """
+        Go through all the objects in the document and look for JS or images to mangle.
+        """
+        for obj in tqdm(self.pdf.objects, desc="Objects", leave=False):
+            try:
+                if "/JS" in obj.keys():
+                    self.replace_javascript(obj)
+                elif "/Subtype" in obj.keys() and obj.Subtype == "/Image":
+                    self.replace_image(obj)
+            except AttributeError:
+                # Not a dictionary
+                pass
 
     def mangle_pdf(self) -> None:
         """
@@ -470,6 +464,8 @@ class Mangler:
 
         self.strip_metadata()
         self.mangle_root()
+        self.mangle_objects()
+
         for page in tqdm(self._pdf.pages, desc="Pages"):
             self.state["page"] = page.index
 
