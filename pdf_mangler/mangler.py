@@ -251,6 +251,19 @@ class Mangler:
             # look for sneaky grouping titles in the order array
             self.mangle_ocg_order(oc_props.D.Order)
 
+    def mangle_pieceinfo(self, piece_info: pikepdf.Dictionary) -> None:
+        """
+        Recursively goes through pieceinfo and mangles any text.
+        """
+        for key in piece_info.keys():
+            if isinstance(piece_info[key], pikepdf.String):
+                piece_info[key] = pikepdf.String(tu.replace_text(str(piece_info[key])))
+            elif isinstance(piece_info[key], pikepdf.Stream):
+                # overwrite with empty stream
+                piece_info[key].write(b"")
+            elif isinstance(piece_info[key], pikepdf.Dictionary):
+                self.mangle_pieceinfo(piece_info[key])
+
     def mangle_root(self) -> None:
         """
         Mangles information from the root, such as OCGs and Outlines.
@@ -261,6 +274,9 @@ class Mangler:
 
             elif key == "/Outlines":
                 self.mangle_outlines(self._pdf.Root[key])
+
+            elif key == "/PieceInfo":
+                self.mangle_pieceinfo(self._pdf.Root[key])
 
     def create_hash_name(self) -> None:
         """
@@ -470,8 +486,8 @@ class Mangler:
                 del page.Thumb
 
             elif key == "/PieceInfo" and self.config("mangle", "metadata"):
-                # Delete the PieceInfo, it can be hiding PII metadata
-                del page.PieceInfo
+                # Go through the pieceinfo and mangle strings
+                self.mangle_pieceinfo(page[key])
 
             elif key == "/B":
                 # Article thread bead, deal with this when we have a good example
