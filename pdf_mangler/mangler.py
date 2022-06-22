@@ -10,6 +10,7 @@ from decimal import Decimal
 from math import sqrt
 from tqdm import tqdm
 from PIL import ImageFilter
+from io import BytesIO
 
 import pikepdf
 from pdf_mangler import text_utils as tu
@@ -119,18 +120,53 @@ class Mangler:
         if "/SMask" in obj.keys():
             self.replace_image(obj.SMask)
 
-        try:
-            # replacing image code adapted from https://pikepdf.readthedocs.io/en/latest/topics/images.html
-            pdfimg = pikepdf.PdfImage(obj)
-            pil_img = pdfimg.as_pil_image()
-            pil_img = pil_img.filter(
-                ImageFilter.GaussianBlur(radius=min([obj.Height, obj.Width]) / 8)
-            )
-            obj.write(zlib.compress(pil_img.tobytes()), filter=pikepdf.Name("/FlateDecode"))
-        except pikepdf.PdfError as e:
-            logger.error(
-                f"Failed blurring image with object id {obj.objgen}, falling back to greyscale replacement"
-            )
+        filter = None
+        decode_parms = None
+        img_type = "JPEG"
+        if "/Filter" in obj.keys():
+            filter = obj.Filter
+            # try to guess image type from filter
+
+        if "/DecodeParms" in obj.keys():
+            decode_parms = obj.DecodeParms
+
+        blur_failed = False
+        if self.config("image", "style") == "blur":
+            try:
+                # replacing image code inspired by https://pikepdf.readthedocs.io/en/latest/topics/images.html
+                pdfimg = pikepdf.PdfImage(obj)
+                pil_img = pdfimg.as_pil_image()
+                og_mode = pil_img.mode
+                if og_mode != "RGB":
+                    # probably PNG
+                    img_type = "PNG"
+                    pil_img = pil_img.convert("RGB")
+
+                pil_img = pil_img.filter(
+                    ImageFilter.GaussianBlur(
+                        radius=min([obj.Height, obj.Width]) * self.config("image", "blur_radius")
+                    )
+                )
+
+                if og_mode != "RGB":
+                    pil_img = pil_img.convert(og_mode)
+
+                with BytesIO() as bytestream:
+                    pil_img.save(bytestream, format=img_type)
+                    obj.write(
+                        bytestream.getvalue(),
+                        filter=filter,
+                        decode_parms=decode_parms,
+                        type_check=False,
+                    )
+
+            except Exception as e:
+                logger.error(
+                    f"Failed blurring image with object id {obj.objgen}, falling back to greyscale replacement"
+                )
+                blur_failed = True
+
+        if blur_failed or self.config("image", "style") in ["grey", "gray"]:
             grey = hex(random.randint(100, 200))
             img_bytes = bytes(grey, "utf-8") * 3 * obj.Width * obj.Height
             obj.write(img_bytes)

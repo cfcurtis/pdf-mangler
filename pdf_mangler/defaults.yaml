@@ -38,3 +38,11 @@ path:
   percent_page_keep: 0.75
   # Modify the start of paths as well as ends (more chaotic)
   tweak_start: true
+
+image:
+  # image replacement parameters.
+  # Style is either blur (default) or grey/gray (default fallback)
+  style: blur
+  # Blur radius is given either in pixels if integer or a 
+  # fraction of the smallest image dimension if float.
+  blur_radius: 0.125
