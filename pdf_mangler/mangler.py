@@ -9,6 +9,7 @@ import time
 from decimal import Decimal
 from math import sqrt
 from tqdm import tqdm
+from PIL import ImageFilter
 
 import pikepdf
 from pdf_mangler import text_utils as tu
@@ -55,7 +56,7 @@ class Mangler:
         if filename:
             self.filename = filename
         elif pdf:
-            self._pdf = pdf
+            self.pdf = pdf
 
         if not config_file:
             config_file = DEFAULT_CONFIG
@@ -95,7 +96,7 @@ class Mangler:
 
     def replace_image(self, obj: pikepdf.Object) -> None:
         """
-        Replaces the image object with a random uniform colour image.
+        Shuffles the bytes in an image object and writes them back.
         Something like kittens would be more fun.
         """
         if not self.config["mangle"]["images"]:
@@ -104,11 +105,21 @@ class Mangler:
         if "/SMask" in obj.keys():
             self.replace_image(obj.SMask)
 
-        # inspired by https://github.com/pikepdf/pikepdf/blob/54fea134e09fd75e2602f72f37260016c50def99/tests/test_sanity.py#L63
-        # replace with a random intermediate shade of grey
-        grey = hex(random.randint(100, 200))
-        image_data = bytes(grey, "utf-8") * 3 * obj.Width * obj.Height
-        obj.write(image_data)
+        try:
+            # replacing image code adapted from https://pikepdf.readthedocs.io/en/latest/topics/images.html
+            pdfimg = pikepdf.PdfImage(obj)
+            pil_img = pdfimg.as_pil_image()
+            pil_img = pil_img.filter(
+                ImageFilter.GaussianBlur(radius=min([obj.Height, obj.Width]) / 8)
+            )
+            obj.write(zlib.compress(pil_img.tobytes()), filter=pikepdf.Name("/FlateDecode"))
+        except pikepdf.PdfError as e:
+            logger.error(
+                f"Failed blurring image with object id {obj.objgen}, falling back to greyscale replacement"
+            )
+            grey = hex(random.randint(100, 200))
+            img_bytes = bytes(grey, "utf-8") * 3 * obj.Width * obj.Height
+            obj.write(img_bytes)
 
     def replace_javascript(self, obj: pikepdf.Object) -> None:
         """
@@ -155,13 +166,14 @@ class Mangler:
             return
         try:
             # replace the title text
-            entry.Title = pikepdf.String(tu.replace_text(str(entry.Title)))
-
+            if "/Title" in entry.keys():
+                entry.Title = pikepdf.String(tu.replace_text(str(entry.Title)))
             if "/First" in entry.keys():
                 self.mangle_outlines(entry.First)
             if "/Next" in entry.keys():
                 self.mangle_outlines(entry.Next)
         except AttributeError:
+            # not a dictionary
             pass
 
     def mangle_ocg_order(self, oc_list: pikepdf.Array) -> None:
