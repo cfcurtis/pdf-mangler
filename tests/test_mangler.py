@@ -42,3 +42,10 @@ def test_javascript():
     mglr.mangle_pdf()
     mglr.save()
     assert os.path.exists(mglr.hash_name)
+
+
+def test_config():
+    mglr = mangler.Mangler()
+    assert isinstance(mglr.config("mangle"), dict)
+    assert mglr.config("mangle", "metadata") == True
+    assert mglr.config("mangle", "nonexistant") is None

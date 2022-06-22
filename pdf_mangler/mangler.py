@@ -63,12 +63,12 @@ class Mangler:
 
         try:
             with open(config_file, "r") as f:
-                self.config = yaml.safe_load(f)
+                self._config = yaml.safe_load(f)
         except Exception as e:
             logger.error(f"Failed loading config file {config_file} with error {e}")
             logger.info(f"Falling back to defaults")
             with open(DEFAULT_CONFIG, "r") as f:
-                self.config = yaml.safe_load(f)
+                self._config = yaml.safe_load(f)
 
     @property
     def filename(self) -> str:
@@ -94,12 +94,26 @@ class Mangler:
             "default": tu.LATIN_1,
         }
 
+    def config(self, *keys: str):
+        """
+        Returns the config value for the given category and key, or None if it doesn't exist.
+        """
+        try:
+            config = self._config
+            for key in keys:
+                config = config[key]
+
+            return config
+        except KeyError:
+            logger.warning(f"Config key {keys} not found")
+            return None
+
     def replace_image(self, obj: pikepdf.Object) -> None:
         """
         Shuffles the bytes in an image object and writes them back.
         Something like kittens would be more fun.
         """
-        if not self.config["mangle"]["images"]:
+        if not self.config("mangle", "images"):
             return
 
         if "/SMask" in obj.keys():
@@ -125,7 +139,7 @@ class Mangler:
         """
         Check if an object is javascript, and if so, replace it.
         """
-        if not self.config["mangle"]["javascript"]:
+        if not self.config("mangle", "javascript"):
             return
 
         js_string = f'app.alert("Javascript detected in object {obj.objgen}");'
@@ -139,14 +153,14 @@ class Mangler:
         """
         Remove identifying information from the PDF.
         """
-        if not self.config["mangle"]["metadata"]:
+        if not self.config("mangle", "metadata"):
             return
 
         # retain some information from the metadata
         keep = {}
         with self._pdf.open_metadata(set_pikepdf_as_editor=False) as meta:
             for key in meta.keys():
-                if any([field in key for field in self.config["metadata"]["keep"]]):
+                if any([field in key for field in self.config("metadata", "keep")]):
                     keep[key] = meta[key]
 
         # obliterate the rest
@@ -162,7 +176,7 @@ class Mangler:
         """
         Recursively mangles the titles of the outline entries
         """
-        if not self.config["mangle"]["outlines"]:
+        if not self.config("mangle", "outlines"):
             return
         try:
             # replace the title text
@@ -190,7 +204,7 @@ class Mangler:
         """
         Mangles the names of the OCGs.
         """
-        if not self.config["mangle"]["ocg_names"]:
+        if not self.config("mangle", "ocg_names"):
             return
 
         if "/OCGs" in oc_props.keys():
@@ -262,7 +276,7 @@ class Mangler:
         """
         Modifies the text operands.
         """
-        if not self.config["mangle"]["text"]:
+        if not self.config("mangle", "text"):
             return
 
         # Replace text with random characters
@@ -284,16 +298,16 @@ class Mangler:
         """
         Randomly modifies path construction operands to mangle vector graphics.
         """
-        if not self.config["mangle"]["paths"]:
+        if not self.config("mangle", "paths"):
             return operands
 
         new_point_ids = None
 
         if operator == "m":
             # single point to start/end path
-            if self.config["path"]["tweak_start"]:
+            if self.config("path", "tweak_start"):
                 operands = [
-                    op + Decimal(random.random() * (self.config["path"]["min_tweak"]))
+                    op + Decimal(random.random() * (self.config("path", "min_tweak")))
                     for op in operands
                 ]
             self.state["point"] = (operands[0], operands[1])
@@ -313,14 +327,14 @@ class Mangler:
             diag = sqrt(operands[2] ** 2 + operands[3] ** 2)
 
             # if the rectangle covers most of the page, don't modify it (likely a border)
-            if (
-                operands[2] < self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
-                and operands[3]
-                < self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
+            if operands[2] < self.state["page_dims"][0] * self.config(
+                "path", "percent_page_keep"
+            ) and operands[3] < self.state["page_dims"][1] * self.config(
+                "path", "percent_page_keep"
             ):
                 # we don't need to update the previous point because re doesn't modify it
                 max_tweak = max(
-                    self.config["path"]["min_tweak"], diag * self.config["path"]["percent_tweak"]
+                    self.config("path", "min_tweak"), diag * self.config("path", "percent_tweak")
                 )
                 operands = [op + Decimal(random.random() * max_tweak) for op in operands]
         else:
@@ -336,12 +350,11 @@ class Mangler:
             self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
 
             # if a line is parallel to and spans most of the page, don't modify it
-            if (
-                x < self.state["page_dims"][0] * self.config["path"]["percent_page_keep"]
-                and y > self.state["page_dims"][1] * self.config["path"]["percent_page_keep"]
-            ):
+            if x < self.state["page_dims"][0] * self.config(
+                "path", "percent_page_keep"
+            ) and y > self.state["page_dims"][1] * self.config("path", "percent_page_keep"):
                 max_tweak = max(
-                    self.config["path"]["min_tweak"], mag * self.config["path"]["percent_tweak"]
+                    self.config("path", "min_tweak"), mag * self.config("path", "percent_tweak")
                 )
                 for id in new_point_ids:
                     operands[id] = operands[id] + Decimal(random.random() * max_tweak)
@@ -365,7 +378,7 @@ class Mangler:
         Go through the stream instructions and mangle the content.
         Replace text with random characters and distort vector graphics.
         """
-        if not self.config["mangle"]["content"]:
+        if not self.config("mangle", "content"):
             if "/Content" in stream.keys():
                 return stream.Content
             else:
@@ -416,11 +429,11 @@ class Mangler:
                         # forms might recursively reference other forms
                         self.mangle_references(xobj)
 
-            elif key == "/Thumb" and self.config["mangle"]["thumbnails"]:
+            elif key == "/Thumb" and self.config("mangle", "thumbnails"):
                 # just delete the thumbnail, can't seem to parse the image
                 del page.Thumb
 
-            elif key == "/PieceInfo" and self.config["mangle"]["metadata"]:
+            elif key == "/PieceInfo" and self.config("mangle", "metadata"):
                 # Delete the PieceInfo, it can be hiding PII metadata
                 del page.PieceInfo
 
@@ -429,7 +442,7 @@ class Mangler:
                 logger.info(f"Found an article bead on page {page.index}, not yet handled")
                 pass
 
-            elif key == "/Annots" and self.config["mangle"]["annotations"]:
+            elif key == "/Annots" and self.config("mangle", "annotations"):
                 # annotations
                 for annot in page.Annots:
                     if annot.Subtype == "/Link":
