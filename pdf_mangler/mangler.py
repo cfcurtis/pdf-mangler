@@ -305,24 +305,20 @@ class Mangler:
 
         self.hash_name += ".pdf"
 
-    def define_font_maps(self, page: pikepdf.Page) -> None:
+    def add_font_map(self, font: pikepdf.Object) -> None:
         """
-        Parses the fonts on the page and defines the character/category mapping
+        Defines the character/category mapping for the font object reference.
         """
+        name = font.objgen
 
-        if "/Resources" not in page.keys() or "/Font" not in page.Resources.keys():
-            # No fonts defined, stick with the default
-            return
-
-        for name, font in page.Resources.Font.items():
-            if "/FontDescriptor" in font.keys() and "/CharSet" in font.FontDescriptor.keys():
-                self.font_map[name] = tu.map_charset(str(font.FontDescriptor.CharSet))
-            elif "/FirstChar" in font.keys():
-                # define the map based on the first char and last char
-                self.font_map[name] = tu.map_numeric_range(int(font.FirstChar), int(font.LastChar))
-            else:
-                # Assume it's Latin-1
-                self.font_map[name] = tu.LATIN_1
+        if "/FontDescriptor" in font.keys() and "/CharSet" in font.FontDescriptor.keys():
+            self.font_map[name] = tu.map_charset(str(font.FontDescriptor.CharSet))
+        elif "/FirstChar" in font.keys():
+            # define the map based on the first char and last char
+            self.font_map[name] = tu.map_numeric_range(int(font.FirstChar), int(font.LastChar))
+        else:
+            # Assume it's Latin-1
+            self.font_map[name] = tu.LATIN_1
 
     def mangle_text(self, operands: list) -> None:
         """
@@ -439,9 +435,6 @@ class Mangler:
         # store some info about the page itself
         self.state["page_dims"] = get_page_dims(stream)
 
-        # define the character maps of the fonts on the page
-        self.define_font_maps(stream)
-
         og_commands = pikepdf.parse_content_stream(stream)
         commands = []
         block = None
@@ -449,7 +442,7 @@ class Mangler:
             if block is not None:
                 block.append((operands, operator))
             elif operator == FONT_CHANGE:
-                self.state["font"] = str(operands[0])
+                self.state["font"] = stream.Resources.Font[operands[0]].objgen
             elif operator in TEXT_SHOW_OPS:
                 self.mangle_text(operands)
             elif operator in CLIPPING_PATH_OPS:
@@ -521,6 +514,9 @@ class Mangler:
                     self.replace_javascript(obj)
                 elif "/Subtype" in obj.keys() and obj.Subtype == "/Image":
                     self.replace_image(obj)
+                elif "/Type" in obj.keys() and obj.Type == "/Font":
+                    self.add_font_map(obj)
+
             except AttributeError:
                 # Not a dictionary
                 pass
