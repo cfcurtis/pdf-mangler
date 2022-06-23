@@ -40,7 +40,7 @@ def get_page_dims(page: pikepdf.Page) -> float:
     """
     Checks the various boxes defined on the page and returns the smallest width, height, and diagonal.
     """
-    dims = [float("inf")] * 3
+    dims = [float("inf")] * 2
     for key in page.keys():
         if "Box" in key:
             # Box rectangles are defined differently than drawn rectangles, just to be fun
@@ -371,13 +371,18 @@ class Mangler:
         new_point_ids = None
 
         if operator == "m":
+            self.state["point"] = (operands[0], operands[1])
             # single point to start/end path
             if self.config("path", "tweak_start"):
                 operands = [
-                    op + Decimal(random.random() * (self.config("path", "min_tweak")))
+                    op
+                    + Decimal(
+                        random.uniform(
+                            -self.config("path", "min_tweak"), self.config("path", "min_tweak")
+                        )
+                    )
                     for op in operands
                 ]
-            self.state["point"] = (operands[0], operands[1])
         elif operator == "l":
             # end of a path
             new_point_ids = (0, 1)
@@ -403,7 +408,7 @@ class Mangler:
                 max_tweak = max(
                     self.config("path", "min_tweak"), diag * self.config("path", "percent_tweak")
                 )
-                operands = [op + Decimal(random.random() * max_tweak) for op in operands]
+                operands = [op + Decimal(random.uniform(-max_tweak, max_tweak)) for op in operands]
         else:
             # Don't know what this is, so raise a warning if it happens
             logger.warning(f"Unknown path operator {operator} found on page {self.state['page']}")
@@ -416,15 +421,15 @@ class Mangler:
             # update the previous point
             self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
 
-            # if a line is parallel to and spans most of the page, don't modify it
+            # if a line spans most of the page, don't modify it
             if x < self.state["page_dims"][0] * self.config(
                 "path", "percent_page_keep"
-            ) and y > self.state["page_dims"][1] * self.config("path", "percent_page_keep"):
+            ) and y < self.state["page_dims"][1] * self.config("path", "percent_page_keep"):
                 max_tweak = max(
                     self.config("path", "min_tweak"), mag * self.config("path", "percent_tweak")
                 )
                 for id in new_point_ids:
-                    operands[id] = operands[id] + Decimal(random.random() * max_tweak)
+                    operands[id] = operands[id] + Decimal(random.uniform(-max_tweak, max_tweak))
 
         return operands
 
