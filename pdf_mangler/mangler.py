@@ -9,7 +9,7 @@ import time
 from decimal import Decimal
 from math import sqrt
 from tqdm import tqdm
-from PIL import ImageFilter
+from PIL import Image, ImageFilter
 from io import BytesIO
 
 import pikepdf
@@ -23,6 +23,15 @@ PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y"
 CLIPPING_PATH_OPS = [pikepdf.Operator(op) for op in ["W", "W*"]]
 BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
 BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
+
+MODE_MAP = {
+    "/DeviceRGB": "RGB",
+    "/DeviceGray": "L",
+    "/DeviceCMYK": "CMYK",
+    "/CalRGB": "RGB",
+    "/CalGray": "L",
+    "/Lab": "LAB",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +131,6 @@ class Mangler:
 
         filter = None
         decode_parms = None
-        img_type = "JPEG"
         if "/Filter" in obj.keys():
             filter = obj.Filter
             # try to guess image type from filter
@@ -138,8 +146,7 @@ class Mangler:
                 pil_img = pdfimg.as_pil_image()
                 og_mode = pil_img.mode
                 if og_mode != "RGB":
-                    # probably PNG
-                    img_type = "PNG"
+                    # Gaussian Blur filter only works on RGB
                     pil_img = pil_img.convert("RGB")
 
                 pil_img = pil_img.filter(
@@ -151,15 +158,6 @@ class Mangler:
                 if og_mode != "RGB":
                     pil_img = pil_img.convert(og_mode)
 
-                with BytesIO() as bytestream:
-                    pil_img.save(bytestream, format=img_type)
-                    obj.write(
-                        bytestream.getvalue(),
-                        filter=filter,
-                        decode_parms=decode_parms,
-                        type_check=False,
-                    )
-
             except Exception as e:
                 logger.error(
                     f"Failed blurring image with object id {obj.objgen}, falling back to greyscale replacement"
@@ -167,9 +165,30 @@ class Mangler:
                 blur_failed = True
 
         if blur_failed or self.config("image", "style") in ["grey", "gray"]:
-            grey = hex(random.randint(100, 200))
-            img_bytes = bytes(grey, "utf-8") * 3 * obj.Width * obj.Height
-            obj.write(img_bytes)
+            mode = "RGB"
+            if "/ColorSpace" in obj.keys() and obj.ColorSpace in MODE_MAP:
+                mode = MODE_MAP[obj.ColorSpace]
+
+            if len(mode) == 1:
+                pil_img = Image.new(mode=mode, size=(obj.Width, obj.Height), color=128)
+            else:
+                pil_img = Image.new(
+                    mode=mode, size=(obj.Width, obj.Height), color=(128,) * len(mode)
+                )
+
+        try:
+            obj.write(
+                zlib.compress(pil_img.tobytes()),
+                filter=filter,
+                decode_parms=decode_parms,
+                type_check=False,
+            )
+        except:
+            logger.error(
+                f"Could not write image with original parameters, creating RBG FlateDecode image"
+            )
+            pil_img = Image.new(mode="RGB", size=(obj.Width, obj.Height), color=(128, 128, 128))
+            obj.write(zlib.compress(pil_img.tobytes(), filter=pikepdf.Name("/FlateDecode")))
 
     def replace_javascript(self, obj: pikepdf.Object) -> None:
         """
