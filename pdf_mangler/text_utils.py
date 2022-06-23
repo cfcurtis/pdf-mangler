@@ -137,6 +137,10 @@ def replace_text(text: str, char_cats: dict = LATIN_1) -> str:
             else:
                 # otherwise replace with a random character from the same category
                 random_text += random.choice(char_cats[cat])
+        elif cat in LATIN_1["default"].keys():
+            # If it's in the default subset of the LATIN_1 charset, choose one of those.
+            # Unsure how this occurs but seems to happen sometimes.
+            random_text += random.choice(LATIN_1["default"][cat])
         else:
             logger.warning(f"Passing through {char} with unknown category {cat}")
             random_text += char
