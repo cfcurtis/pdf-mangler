@@ -470,7 +470,7 @@ class Mangler:
                 self.state["font"] = stream.Resources.Font[operands[0]].objgen
             elif operator in TEXT_SHOW_OPS:
                 self.mangle_text(operands)
-            elif operator in CLIPPING_PATH_OPS:
+            elif operator in CLIPPING_PATH_OPS and self.config("path", "exclude_clip"):
                 # back up, undo the previous path modification
                 for j in range(len(commands) - 1, -1, -1):
                     if commands[j][1] in PATH_CONSTRUCTION_OPS:

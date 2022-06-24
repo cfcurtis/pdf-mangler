@@ -38,6 +38,8 @@ path:
   percent_page_keep: 0.75
   # Modify the start of paths as well as ends (more chaotic)
   tweak_start: true
+  # Keep clipping paths as-is
+  exclude_clip: true
 
 image:
   # image replacement parameters.
