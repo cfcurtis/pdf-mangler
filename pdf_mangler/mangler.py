@@ -134,7 +134,6 @@ class Mangler:
         decode_parms = None
         if "/Filter" in obj.keys():
             filter = obj.Filter
-            # try to guess image type from filter
 
         if "/DecodeParms" in obj.keys():
             decode_parms = obj.DecodeParms
@@ -150,7 +149,7 @@ class Mangler:
                 if og_mode != "RGB":
                     # Gaussian Blur filter only works on RGB
                     pil_img = pil_img.convert("RGB")
-                if og_mode == "P":
+                if og_mode in ["P", "I"]:
                     # Palettized, likely PNG
                     img_type = "PNG"
 
@@ -424,11 +423,15 @@ class Mangler:
             self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
 
             # if a line is parallel to and spans most of the page, don't modify it
-            if (
-                x < self.state["page_dims"][0] * self.config("path", "percent_page_keep")
-                and y > 0
-                and y < self.state["page_dims"][1] * self.config("path", "percent_page_keep")
-                and x > 0
+            if not (
+                (
+                    x >= self.state["page_dims"][0] * self.config("path", "percent_page_keep")
+                    and y < 9
+                )
+                or (
+                    y >= self.state["page_dims"][1] * self.config("path", "percent_page_keep")
+                    and x < 0
+                )
             ):
                 max_tweak = max(
                     self.config("path", "min_tweak"), mag * self.config("path", "percent_tweak")
