@@ -140,6 +140,7 @@ class Mangler:
             decode_parms = obj.DecodeParms
 
         blur_failed = False
+        img_type = "JPEG"
         if self.config("image", "style") == "blur":
             try:
                 # replacing image code inspired by https://pikepdf.readthedocs.io/en/latest/topics/images.html
@@ -149,6 +150,9 @@ class Mangler:
                 if og_mode != "RGB":
                     # Gaussian Blur filter only works on RGB
                     pil_img = pil_img.convert("RGB")
+                if og_mode == "P":
+                    # Palettized, likely PNG
+                    img_type = "PNG"
 
                 pil_img = pil_img.filter(
                     ImageFilter.GaussianBlur(
@@ -178,18 +182,20 @@ class Mangler:
                 )
 
         try:
-            obj.write(
-                zlib.compress(pil_img.tobytes()),
-                filter=filter,
-                decode_parms=decode_parms,
-                type_check=False,
-            )
+            with BytesIO() as bytestream:
+                pil_img.save(bytestream, format=img_type)
+                obj.write(
+                    bytestream.getvalue(),
+                    filter=filter,
+                    decode_parms=decode_parms,
+                    type_check=False,
+                )
         except:
             logger.error(
                 f"Could not write image with original parameters, creating RBG FlateDecode image"
             )
             pil_img = Image.new(mode="RGB", size=(obj.Width, obj.Height), color=(128, 128, 128))
-            obj.write(zlib.compress(pil_img.tobytes(), filter=pikepdf.Name("/FlateDecode")))
+            obj.write(zlib.compress(pil_img.tobytes()), filter=pikepdf.Name("/FlateDecode"))
 
     def replace_javascript(self, obj: pikepdf.Object) -> None:
         """
