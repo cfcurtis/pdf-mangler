@@ -362,6 +362,14 @@ class Mangler:
             # Not sure what this means, so raise a warning if it happens
             logger.warning(f"Unknown text operand {operands[0]} found on page {self.state['page']}")
 
+    def is_background_line(self, x: Decimal, y: Decimal) -> bool:
+        """
+        Checks to see if the line runs parallel to and most of the length of the page.
+        """
+        p_x, p_y = [d * self.config("path", "percent_page_keep") for d in self.state["page_dims"]]
+        # 9 is 1/8" in pdf units, seems like a reasonable value for parallelness
+        return (x > p_x and y < 9) or (y > p_y and x < 9) or (x > p_x and y > p_y)
+
     def mangle_path(self, operands: list, operator: str) -> list:
         """
         Randomly modifies path construction operands to mangle vector graphics.
@@ -400,11 +408,7 @@ class Mangler:
             diag = sqrt(operands[2] ** 2 + operands[3] ** 2)
 
             # if the rectangle covers most of the page, don't modify it (likely a border)
-            if abs(operands[2]) < self.state["page_dims"][0] * self.config(
-                "path", "percent_page_keep"
-            ) and abs(operands[3]) < self.state["page_dims"][1] * self.config(
-                "path", "percent_page_keep"
-            ):
+            if not self.is_background_line(abs(operands[2]), abs(operands[3])):
                 # we don't need to update the previous point because re doesn't modify it
                 max_tweak = max(
                     self.config("path", "min_tweak"), diag * self.config("path", "percent_tweak")
@@ -423,16 +427,7 @@ class Mangler:
             self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
 
             # if a line is parallel to and spans most of the page, don't modify it
-            if not (
-                (
-                    x >= self.state["page_dims"][0] * self.config("path", "percent_page_keep")
-                    and y < 9
-                )
-                or (
-                    y >= self.state["page_dims"][1] * self.config("path", "percent_page_keep")
-                    and x < 0
-                )
-            ):
+            if not self.is_background_line(x, y):
                 max_tweak = max(
                     self.config("path", "min_tweak"), mag * self.config("path", "percent_tweak")
                 )
