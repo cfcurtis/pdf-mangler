@@ -21,6 +21,7 @@ FONT_CHANGE = pikepdf.Operator("Tf")
 TEXT_SHOW_OPS = [pikepdf.Operator(op) for op in ["Tj", "TJ", "'", '"']]
 PATH_CONSTRUCTION_OPS = [pikepdf.Operator(op) for op in ["m", "l", "c", "v", "y", "re"]]
 CLIPPING_PATH_OPS = [pikepdf.Operator(op) for op in ["W", "W*"]]
+PATH_START_OPS = [pikepdf.Operator(op) for op in ["m", "re"]]
 BLOCK_BEGIN_OPS = [pikepdf.Operator(op) for op in ["BI"]]
 BLOCK_END_OPS = [pikepdf.Operator(op) for op in ["EI"]]
 
@@ -399,9 +400,9 @@ class Mangler:
             diag = sqrt(operands[2] ** 2 + operands[3] ** 2)
 
             # if the rectangle covers most of the page, don't modify it (likely a border)
-            if operands[2] < self.state["page_dims"][0] * self.config(
+            if abs(operands[2]) < self.state["page_dims"][0] * self.config(
                 "path", "percent_page_keep"
-            ) and operands[3] < self.state["page_dims"][1] * self.config(
+            ) and abs(operands[3]) < self.state["page_dims"][1] * self.config(
                 "path", "percent_page_keep"
             ):
                 # we don't need to update the previous point because re doesn't modify it
@@ -421,10 +422,13 @@ class Mangler:
             # update the previous point
             self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
 
-            # if a line spans most of the page, don't modify it
-            if x < self.state["page_dims"][0] * self.config(
-                "path", "percent_page_keep"
-            ) and y < self.state["page_dims"][1] * self.config("path", "percent_page_keep"):
+            # if a line is parallel to and spans most of the page, don't modify it
+            if (
+                x < self.state["page_dims"][0] * self.config("path", "percent_page_keep")
+                and y > 0
+                and y < self.state["page_dims"][1] * self.config("path", "percent_page_keep")
+                and x > 0
+            ):
                 max_tweak = max(
                     self.config("path", "min_tweak"), mag * self.config("path", "percent_tweak")
                 )
@@ -456,9 +460,6 @@ class Mangler:
             else:
                 return stream
 
-        # store some info about the page itself
-        self.state["page_dims"] = get_page_dims(stream)
-
         og_commands = pikepdf.parse_content_stream(stream)
         commands = []
         block = None
@@ -471,7 +472,11 @@ class Mangler:
                 self.mangle_text(operands)
             elif operator in CLIPPING_PATH_OPS:
                 # back up, undo the previous path modification
-                commands[i - 1] = og_commands[i - 1]
+                for j in range(len(commands) - 1, -1, -1):
+                    if commands[j][1] in PATH_CONSTRUCTION_OPS:
+                        commands[j] = og_commands[j]
+                    if commands[j][1] in PATH_START_OPS:
+                        break
             elif operator in BLOCK_BEGIN_OPS:
                 # start of a block, so we need to save a buffer and mangle all at once
                 block = [(operands, operator)]
@@ -560,6 +565,8 @@ class Mangler:
 
         for page in tqdm(self._pdf.pages, desc="Pages"):
             self.state["page"] = page.index
+            # store some info about the page itself
+            self.state["page_dims"] = get_page_dims(page)
 
             # first mangle the contents of the page itself
             page.Contents = self._pdf.make_stream(self.mangle_content(page))
