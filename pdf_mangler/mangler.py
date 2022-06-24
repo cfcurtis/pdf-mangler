@@ -305,21 +305,16 @@ class Mangler:
         if "/ID" in self._pdf.trailer.keys():
             self.hash_name = hashlib.md5(bytes(self._pdf.trailer.ID[0])).hexdigest()
         else:
-            # Loop through the objects and concatenate contents, then hash.
+            # Loop through the pages and concatenate contents, then hash.
             # This ignores metadata and probably doesn't guarantee a consistent ID.
             contents = b""
-            for obj in self._pdf.objects:
-                try:
-                    if "/Contents" in obj.keys():
-                        if isinstance(obj.Contents, pikepdf.Array):
-                            # loop through
-                            for stream in obj.Contents:
-                                contents += stream.read_raw_bytes()
-                        else:
-                            contents += obj.Contents.read_raw_bytes()
-                except AttributeError:
-                    # no Contents, skip this one
-                    pass
+            for page in self.pdf.pages:
+                if isinstance(page.Contents, pikepdf.Array):
+                    # loop through the contents array
+                    for stream in page.Contents:
+                        contents += stream.read_raw_bytes()
+                else:
+                    contents += page.Contents.read_raw_bytes()
 
             self.hash_name = hashlib.md5(contents).hexdigest()
 
