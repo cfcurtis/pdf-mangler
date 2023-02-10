@@ -1,6 +1,29 @@
+[project]
+name = "pdf-mangler"
+version = "0.1"
+description = "Anonymize and obfuscate PDF info while retaining structure"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+keywords = ["pdf", "utility", "anonymization", "privacy"]
+authors = [
+    {name = "Charlotte Curtis"},
+    {email = "ccurtis@mtroyal.ca"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Operating System :: OS Independent"
+]
+
+[project.urls]
+repository = "https://github.com/cfcurtis/pdf-mangler"
+
 [build-system]
 requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["pdf_mangler"]
 
 [tool.black]
 line-length = 100
