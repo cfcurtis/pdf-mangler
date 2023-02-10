@@ -1,0 +1,27 @@
+name: Publish to PyPi
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pypi-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      
+      - name: Build files
+        run: |
+          pip3 install build
+          python3 -m build
+      
+      - name: Publish to pypi
+        uses: pypa/gh-action-pypi-publish@v1.6.4
+        with:
+          password:  ${{ secrets.PYPI_TOKEN }}
