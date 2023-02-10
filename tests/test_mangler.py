@@ -19,6 +19,16 @@ def test_hash_name():
     assert mglr.hash_name == "610f592b04350db727f5a24f37342262.pdf"
 
 
+def test_save_path():
+    mglr = mangler.Mangler("sample-sigconf.pdf")
+    mglr.mangle_pdf()
+    mglr.save()
+    assert os.path.exists(mglr.hash_name)
+
+    mglr.save("..")
+    assert os.path.exists(Path("..") / mglr.hash_name)
+
+
 def test_reuse_object():
     mglr = mangler.Mangler("sunny_mountain_overalls.pdf")
     mglr.mangle_pdf()
