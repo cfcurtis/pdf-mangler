@@ -1,6 +1,6 @@
 [project]
 name = "pdf-mangler"
-version = "0.1"
+version = "0.1.1"
 description = "Anonymize and obfuscate PDF info while retaining structure"
 readme = "README.md"
 requires-python = ">=3.8"

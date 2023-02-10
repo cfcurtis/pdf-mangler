@@ -580,11 +580,11 @@ class Mangler:
         logger.info(info_str + f"\n{'*'*80}\n")
         print(info_str)
 
-    def save(self) -> None:
+    def save(self, folder: str = ".") -> None:
         """
         Save the mangled pdf.
         """
-        self._pdf.save(self.hash_name, fix_metadata_version=False)
+        self._pdf.save(Path(folder) / self.hash_name, fix_metadata_version=False)
 
 
 def main(log_level: int = logging.INFO, show_output: bool = False) -> None:
