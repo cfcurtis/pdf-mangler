@@ -1,0 +1,2 @@
+recursive-include pdf_mangler *.yaml
+recursive-include pdf_mangler *.txt
