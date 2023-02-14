@@ -59,3 +59,10 @@ def test_config():
     assert isinstance(mglr.config("mangle"), dict)
     assert mglr.config("mangle", "metadata") == True
     assert mglr.config("mangle", "nonexistant") is None
+
+
+def test_png_image():
+    mglr = mangler.Mangler("chalk_drawing.pdf")
+    mglr.mangle_pdf()
+    mglr.save()
+    assert os.path.exists(mglr.hash_name)

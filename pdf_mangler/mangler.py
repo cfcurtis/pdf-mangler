@@ -139,7 +139,7 @@ class Mangler:
             decode_parms = obj.DecodeParms
 
         blur_failed = False
-        img_type = "JPEG"
+
         if self.config("image", "style") == "blur":
             try:
                 # replacing image code inspired by https://pikepdf.readthedocs.io/en/latest/topics/images.html
@@ -149,9 +149,6 @@ class Mangler:
                 if og_mode != "RGB":
                     # Gaussian Blur filter only works on RGB
                     pil_img = pil_img.convert("RGB")
-                if og_mode in ["P", "I"]:
-                    # Palettized, likely PNG
-                    img_type = "PNG"
 
                 pil_img = pil_img.filter(
                     ImageFilter.GaussianBlur(
@@ -160,6 +157,7 @@ class Mangler:
                 )
 
                 if og_mode != "RGB":
+                    # convert it back to the original mode
                     pil_img = pil_img.convert(og_mode)
 
             except Exception as e:
@@ -181,14 +179,21 @@ class Mangler:
                 )
 
         try:
-            with BytesIO() as bytestream:
-                pil_img.save(bytestream, format=img_type)
-                obj.write(
-                    bytestream.getvalue(),
-                    filter=filter,
-                    decode_parms=decode_parms,
-                    type_check=False,
-                )
+            # A bit hacky, but it seems to work
+            if filter == pikepdf.Name("/DCTDecode"):
+                # Likely JPEG
+                with BytesIO() as bytestream:
+                    pil_img.save(bytestream, format="JPEG")
+                    obj.write(
+                        bytestream.getvalue(),
+                        filter=filter,
+                        decode_parms=decode_parms,
+                        type_check=False,
+                    )
+            else:
+                # Probably PNG?
+                obj.write(zlib.compress(pil_img.tobytes()), filter=filter)
+
         except:
             logger.error(
                 f"Could not write image with original parameters, creating RBG FlateDecode image"
