@@ -589,7 +589,16 @@ class Mangler:
         """
         Save the mangled pdf.
         """
-        self._pdf.save(Path(folder) / self.hash_name, fix_metadata_version=False)
+        enc = None
+        # copy over the encryption info, but blow away the passwords
+        if self._pdf.is_encrypted:
+            enc = pikepdf.Encryption(
+                owner="",
+                user="",
+                R=self._pdf.encryption.R,
+                allow=self._pdf.allow,
+            )
+        self._pdf.save(Path(folder) / self.hash_name, fix_metadata_version=False, encryption=enc)
 
 
 def main(log_level: int = logging.INFO, show_output: bool = False) -> None:
