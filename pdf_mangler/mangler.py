@@ -81,6 +81,8 @@ class Mangler:
             with open(DEFAULT_CONFIG, "r") as f:
                 self._config = yaml.safe_load(f)
 
+        self.updater = None
+
     @property
     def filename(self) -> str:
         return self._pdf.filename
@@ -501,7 +503,11 @@ class Mangler:
         """
         for key in page.keys():
             if key == "/Resources" and "/XObject" in page.Resources.keys():
-                for _, xobj in tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False):
+                if self.updater:
+                    items = page.Resources.XObject.items()
+                else:
+                    items = tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False)
+                for _, xobj in items:
                     if xobj.Subtype == "/Form":
                         xobj.write(self.mangle_content(xobj))
                         # forms might recursively reference other forms
@@ -541,7 +547,11 @@ class Mangler:
         """
         Go through all the objects in the document and look for JS or images to mangle.
         """
-        for obj in tqdm(self.pdf.objects, desc="Objects", leave=False):
+        if self.updater:
+            items = self.pdf.objects
+        else:
+            items = tqdm(self.pdf.objects, desc="Objects", leave=False)
+        for obj in items:
             try:
                 if "/JS" in obj.keys():
                     self.replace_javascript(obj)
@@ -567,7 +577,18 @@ class Mangler:
         self.mangle_root()
         self.mangle_objects()
 
-        for page in tqdm(self._pdf.pages, desc="Pages"):
+        counter = 0
+        if self.updater:
+            items = self._pdf.pages
+            self.updater.SetRange(len(self._pdf.pages))
+            self.updater.Update(counter)
+        else:
+            items = tqdm(self._pdf.pages, desc="Pages", leave=False)
+
+        for page in items:
+            if self.updater and self.updater.WasCancelled():
+                raise InterruptedError("Cancelled by user")
+
             self.state["page"] = page.index
             # store some info about the page itself
             self.state["page_dims"] = get_page_dims(page)
@@ -577,6 +598,12 @@ class Mangler:
 
             # then deal with the references
             self.mangle_references(page)
+
+            self.updater and self.updater.Update(counter)
+            counter += 1
+
+        # One last call to updater to ensure it's at 100%
+        self.updater and self.updater.Update(counter)
 
         info_str = (
             f"Time elapsed: {time.process_time() - start:0.2f}s\n"
