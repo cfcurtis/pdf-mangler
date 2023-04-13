@@ -14,6 +14,7 @@ from io import BytesIO
 
 import pikepdf
 from pdf_mangler import text_utils as tu
+from pdf_mangler import pdf_ops as po
 
 DEFAULT_CONFIG = Path(__file__).parent / "defaults.yaml"
 ANNOT_TEXT_FIELDS = ["/T", "/Contents", "/RC", "/Subj", "/Dest", "/CA", "/AC"]
@@ -347,27 +348,33 @@ class Mangler:
             # Assume it's Latin-1
             self.font_map[name] = tu.LATIN_1
 
-    def mangle_text(self, operands: list) -> None:
+    def mangle_text(self, operands: bytes, operator: bytes) -> bytes:
         """
         Modifies the text operands.
         """
         if not self.config("mangle", "text"):
-            return
+            return operands
 
-        # Replace text with random characters
-        if isinstance(operands[0], pikepdf.String):
-            operands[0] = pikepdf.String(
-                tu.replace_text(str(operands[0]), self.font_map[self.state["font"]])
-            )
-        elif isinstance(operands[0], pikepdf.Array):
-            for i in range(len(operands[0])):
-                if isinstance(operands[0][i], pikepdf.String):
-                    operands[0][i] = pikepdf.String(
-                        tu.replace_text(str(operands[0][i]), self.font_map[self.state["font"]])
-                    )
+        if operator == b"Tj":
+            # simplest scenario, just replace the text
+            return tu.replace_text(operands, self.font_map[self.state["font"]])
+
         else:
-            # Not sure what this means, so raise a warning if it happens
-            logger.warning(f"Unknown text operand {operands[0]} found on page {self.state['page']}")
+            return operands
+        # # Replace text with random characters
+        # if isinstance(operands[0], pikepdf.String):
+        #     operands[0] = pikepdf.String(
+        #         tu.replace_text(str(operands[0]), self.font_map[self.state["font"]])
+        #     )
+        # elif isinstance(operands[0], pikepdf.Array):
+        #     for i in range(len(operands[0])):
+        #         if isinstance(operands[0][i], pikepdf.String):
+        #             operands[0][i] = pikepdf.String(
+        #                 tu.replace_text(str(operands[0][i]), self.font_map[self.state["font"]])
+        #             )
+        # else:
+        #     # Not sure what this means, so raise a warning if it happens
+        #     logger.warning(f"Unknown text operand {operands[0]} found on page {self.state['page']}")
 
     def is_background_line(self, x: Decimal, y: Decimal) -> bool:
         """
@@ -455,25 +462,63 @@ class Mangler:
                 f"Block starting with {block[0][1]} detected on page {self.state['page']}, not yet handled"
             )
 
-    def mangle_content(self, stream: pikepdf.Object) -> bytes:
+    def mangle_stream(self, stream: pikepdf.Stream, page_or_xobj: pikepdf.Object) -> bytes:
         """
-        Go through the stream instructions and mangle the content.
-        Replace text with random characters and distort vector graphics.
+        Does the actual mangling of the raw bytestream.
         """
-        if not self.config("mangle", "content"):
-            if "/Content" in stream.keys():
-                return stream.Content
-            else:
-                return stream
+        b = BytesIO(stream.get_stream_buffer())
+        new_b = b""
 
-        og_commands = pikepdf.parse_content_stream(stream)
-        commands = []
-        block = None
+        # read the first byte
+        next_byte = b.read(1)
+        command = b""
+        # keep track of the current position in the command and the previous whitespace
+        c_pos = 0
+        prev_whitespace = 0
+        while next_byte:
+            # if it's whitespace or a tag, check if we have an operator
+            if next_byte in po.WHITESPACE or next_byte in po.DELIMITERS:
+                # read back to the previous whitespace and check if it's an operator
+                if command[prev_whitespace:] in po.ALL_OPS:
+                    op = command[prev_whitespace:]
+                    operands = command[:prev_whitespace]
+
+                    if op == po.FONT_CHANGE:
+                        self.state["font"] = page_or_xobj.Resources.Font[
+                            operands.split()[0].decode()
+                        ].objgen
+                    elif op in po.TEXT_SHOW_OPS:
+                        operands = self.mangle_text(operands, op)
+                    elif op in po.CLIPPING_PATH_OPS and self.config("path", "exclude_clip"):
+                        # TBD
+                        pass
+                    elif op in po.PATH_CONSTRUCTION_OPS:
+                        # operands = self.mangle_path(operands, op)
+                        pass
+
+                    # write the command to the new stream
+                    new_b += operands + op
+
+                    # reset the command
+                    command = b""
+                    c_pos = 0
+                    prev_whitespace = 1
+                else:
+                    # not an operator, advance the whitespace index and keep going
+                    prev_whitespace = c_pos + 1
+
+            # always add the next byte, even if it's whitespace
+            command += next_byte
+            c_pos += 1
+            next_byte = b.read(1)
+
+        return new_b
+
         for i, (operands, operator) in enumerate(og_commands):
             if block is not None:
                 block.append((operands, operator))
             elif operator == FONT_CHANGE:
-                self.state["font"] = stream.Resources.Font[operands[0]].objgen
+                self.state["font"] = page_or_xobj.Resources.Font[operands[0]].objgen
             elif operator in TEXT_SHOW_OPS:
                 self.mangle_text(operands)
             elif operator in CLIPPING_PATH_OPS and self.config("path", "exclude_clip"):
@@ -495,7 +540,24 @@ class Mangler:
 
             commands.append((operands, operator))
 
-        return pikepdf.unparse_content_stream(commands)
+    def mangle_content(self, page_or_xobj: pikepdf.Object) -> None:
+        """
+        Go through the page instructions and mangle the content.
+        Replace text with random characters and distort vector graphics.
+        """
+        if not self.config("mangle", "content"):
+            return
+
+        if "/Contents" in page_or_xobj.keys():
+            if isinstance(page_or_xobj.Contents, pikepdf.Array):
+                for i in range(len(page_or_xobj.Contents)):
+                    page_or_xobj.Contents[i].write(
+                        self.mangle_stream(page_or_xobj.Contents[i], page_or_xobj)
+                    )
+            else:
+                page_or_xobj.Contents.write(self.mangle_stream(page_or_xobj.Contents, page_or_xobj))
+        else:
+            page_or_xobj.write(self.mangle_stream(page_or_xobj, page_or_xobj))
 
     def mangle_references(self, page: pikepdf.Page) -> None:
         """
@@ -509,7 +571,7 @@ class Mangler:
                     items = tqdm(page.Resources.XObject.items(), desc="XObjects", leave=False)
                 for _, xobj in items:
                     if xobj.Subtype == "/Form":
-                        xobj.write(self.mangle_content(xobj))
+                        self.mangle_content(xobj)
                         # forms might recursively reference other forms
                         self.mangle_references(xobj)
 
@@ -594,7 +656,7 @@ class Mangler:
             self.state["page_dims"] = get_page_dims(page)
 
             # first mangle the contents of the page itself
-            page.Contents = self._pdf.make_stream(self.mangle_content(page))
+            self.mangle_content(page)
 
             # then deal with the references
             self.mangle_references(page)
