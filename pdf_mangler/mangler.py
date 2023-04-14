@@ -7,7 +7,7 @@ import zlib
 import logging
 import time
 from decimal import Decimal
-from math import sqrt
+from math import sqrt, log10
 from tqdm import tqdm
 from PIL import Image, ImageFilter
 from io import BytesIO
@@ -37,6 +37,7 @@ MODE_MAP = {
 }
 
 logger = logging.getLogger(__name__)
+num_re = re.compile(rb"\-?\d+\.?\d*")
 
 
 def get_page_dims(page: pikepdf.Page) -> float:
@@ -358,15 +359,32 @@ class Mangler:
 
         return tu.replace_bytes(operands, self.font_map[self.state["font"]])
 
-    def is_background_line(self, x: Decimal, y: Decimal) -> bool:
+    def is_background_line(self, dx: float, dy: float) -> bool:
         """
         Checks to see if the line runs parallel to and most of the length of the page.
         """
         p_x, p_y = [d * self.config("path", "percent_page_keep") for d in self.state["page_dims"]]
         # 9 is 1/8" in pdf units, seems like a reasonable value for parallelness
-        return (x > p_x and y < 9) or (y > p_y and x < 9) or (x > p_x and y > p_y)
+        return (dx > p_x and dy < 9) or (dy > p_y and dx < 9) or (dx > p_x and dy > p_y)
 
-    def mangle_path(self, operands: list, operator: str) -> list:
+    def tweak_num(self, num: float, max_tweak: float, width: int) -> bytes:
+        """
+        Randomly tweaks the number num, then writes to a byte string of length width.
+        """
+        new_val = num + random.uniform(-max_tweak, max_tweak)
+        # make sure the sign isn't different, that takes up more space in the string
+        if num < 0 and new_val > 0 or num > 0 and new_val < 0:
+            new_val = -new_val
+
+        n_dec = width - int(log10(abs(new_val))) - 2
+        if n_dec < 1:
+            # it's an integer
+            new_val = int(new_val)
+            return f"{new_val:{width}d}".encode()
+
+        return f"{new_val:{width}.{n_dec}f}".encode()
+
+    def mangle_path(self, operands: bytes, operator: bytes) -> list:
         """
         Randomly modifies path construction operands to mangle vector graphics.
         """
@@ -375,62 +393,72 @@ class Mangler:
 
         new_point_ids = None
 
-        if operator == "m":
-            self.state["point"] = (operands[0], operands[1])
+        # find the numbers and their locations within the operands byte string
+        ops = []
+        for match in num_re.finditer(operands):
+            # append a dict with the value and the start/end indices
+            ops.append({"val": float(match.group()), "start": match.start(), "end": match.end()})
+        op_arr = bytearray(operands)
+
+        if operator == b"m":
+            self.state["point"] = (ops[0]["val"], ops[1]["val"])
             # single point to start/end path
             if self.config("path", "tweak_start"):
-                operands = [
-                    op
-                    + Decimal(
-                        random.uniform(
-                            -self.config("path", "min_tweak"), self.config("path", "min_tweak")
-                        )
+                for i in range(len(ops)):
+                    op_arr[ops[i]["start"] : ops[i]["end"]] = self.tweak_num(
+                        ops[i]["val"],
+                        self.config("path", "min_tweak"),
+                        ops[i]["end"] - ops[i]["start"],
                     )
-                    for op in operands
-                ]
-        elif operator == "l":
+        elif operator == b"l":
             # end of a path
             new_point_ids = (0, 1)
-        elif operator == "c":
+        elif operator == b"c":
             # Bezier curve with two control points.
             # Don't modify the control points, just the end point
             new_point_ids = (4, 5)
-        elif operator in ["v", "y"]:
+        elif operator in [b"v", b"y"]:
             # Bezier curves with one control point.
             # Don't modify the control point, just the end point.
             new_point_ids = (2, 3)
-        elif operator == "re":
-            # rectangle, handle it separately
-            diag = sqrt(operands[2] ** 2 + operands[3] ** 2)
-
+        elif operator == b"re":
+            # rectangle
             # if the rectangle covers most of the page, don't modify it (likely a border)
-            if not self.is_background_line(abs(operands[2]), abs(operands[3])):
-                # we don't need to update the previous point because re doesn't modify it
+            if not self.is_background_line(abs(ops[2]["val"]), abs(ops[3]["val"])):
+                # we don't need to update the previous point because the re operator doesn't modify it
+                diag = sqrt(ops[2]["val"] ** 2 + ops[3]["val"] ** 2)
                 max_tweak = max(
                     self.config("path", "min_tweak"), diag * self.config("path", "percent_tweak")
                 )
-                operands = [op + Decimal(random.uniform(-max_tweak, max_tweak)) for op in operands]
+
+                # update the operands array with the new values, maintaining the original field width
+                for i in range(4):
+                    op_arr[ops[i]["start"] : ops[i]["end"]] = self.tweak_num(
+                        ops[i]["val"], max_tweak, ops[i]["end"] - ops[i]["start"]
+                    )
         else:
             # Don't know what this is, so raise a warning if it happens
             logger.warning(f"Unknown path operator {operator} found on page {self.state['page']}")
 
         if new_point_ids is not None:
-            x = abs(operands[new_point_ids[0]] - self.state["point"][0])
-            y = abs(operands[new_point_ids[1]] - self.state["point"][1])
+            x = abs(ops[new_point_ids[0]]["val"] - self.state["point"][0])
+            y = abs(ops[new_point_ids[1]]["val"] - self.state["point"][1])
             mag = sqrt(x**2 + y**2)
 
             # update the previous point
-            self.state["point"] = (operands[new_point_ids[0]], operands[new_point_ids[1]])
+            self.state["point"] = (ops[new_point_ids[0]]["val"], ops[new_point_ids[1]]["val"])
 
             # if a line is parallel to and spans most of the page, don't modify it
             if not self.is_background_line(x, y):
                 max_tweak = max(
                     self.config("path", "min_tweak"), mag * self.config("path", "percent_tweak")
                 )
-                for id in new_point_ids:
-                    operands[id] = operands[id] + Decimal(random.uniform(-max_tweak, max_tweak))
+                for i in new_point_ids:
+                    op_arr[ops[i]["start"] : ops[i]["end"]] = self.tweak_num(
+                        ops[i]["val"], max_tweak, ops[i]["end"] - ops[i]["start"]
+                    )
 
-        return operands
+        return bytes(op_arr)
 
     def mangle_block(self, block: list) -> None:
         """
@@ -480,8 +508,7 @@ class Mangler:
                         # TBD
                         pass
                     elif op in po.PATH_CONSTRUCTION_OPS:
-                        # operands = self.mangle_path(operands, op)
-                        pass
+                        operands = self.mangle_path(operands, op)
 
                     # write the command to the new stream
                     new_b.write(operands + op)
