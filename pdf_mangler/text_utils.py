@@ -2,11 +2,15 @@ import os
 import unicodedata
 import random
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
 # punctuation, mark, separator, or "other"
 PASS_CATS = set("PMZCS")
+
+# compile the regex to look for things between ()
+in_parens = re.compile(rb"\((.*?)\)")
 
 # Read the glyphlist file and define as a constant
 GLYPHLIST = {}
@@ -144,5 +148,22 @@ def replace_text(text: str, char_cats: dict = LATIN_1) -> str:
         else:
             logger.warning(f"Passing through {char} with unknown category {cat}")
             random_text += char
+
+    return random_text
+
+
+def replace_bytes(text: bytes, char_cats: dict = LATIN_1) -> bytes:
+    """
+    Replace text with random characters, preserving punctuation,
+    case, and numeric type.
+    """
+    # convert to bytearray so we can modify it in place
+    random_text = bytearray(text)
+    for match in in_parens.finditer(text):
+        # replace the text in the parentheses.
+        # Probably a better way of doing this that doesn't require converting to/from strings
+        random_text[match.start(1) : match.end(1)] = replace_text(
+            match.group(1).decode(), char_cats
+        ).encode()
 
     return random_text

@@ -11,6 +11,7 @@ from math import sqrt
 from tqdm import tqdm
 from PIL import Image, ImageFilter
 from io import BytesIO
+import re
 
 import pikepdf
 from pdf_mangler import text_utils as tu
@@ -355,26 +356,7 @@ class Mangler:
         if not self.config("mangle", "text"):
             return operands
 
-        if operator == b"Tj":
-            # simplest scenario, just replace the text
-            return tu.replace_text(operands, self.font_map[self.state["font"]])
-
-        else:
-            return operands
-        # # Replace text with random characters
-        # if isinstance(operands[0], pikepdf.String):
-        #     operands[0] = pikepdf.String(
-        #         tu.replace_text(str(operands[0]), self.font_map[self.state["font"]])
-        #     )
-        # elif isinstance(operands[0], pikepdf.Array):
-        #     for i in range(len(operands[0])):
-        #         if isinstance(operands[0][i], pikepdf.String):
-        #             operands[0][i] = pikepdf.String(
-        #                 tu.replace_text(str(operands[0][i]), self.font_map[self.state["font"]])
-        #             )
-        # else:
-        #     # Not sure what this means, so raise a warning if it happens
-        #     logger.warning(f"Unknown text operand {operands[0]} found on page {self.state['page']}")
+        return tu.replace_bytes(operands, self.font_map[self.state["font"]])
 
     def is_background_line(self, x: Decimal, y: Decimal) -> bool:
         """
@@ -466,24 +448,29 @@ class Mangler:
         """
         Does the actual mangling of the raw bytestream.
         """
+        # Get a read-only buffer and a new buffer to write to
         b = BytesIO(stream.get_stream_buffer())
-        new_b = b""
+        new_b = BytesIO()
 
         # read the first byte
         next_byte = b.read(1)
+
+        # accumulate up the current command
         command = b""
-        # keep track of the current position in the command and the previous whitespace
+
+        # keep track of the previous delimiter position (relative to the command)
+        prev_delim = 0
         c_pos = 0
-        prev_whitespace = 0
         while next_byte:
             # if it's whitespace or a tag, check if we have an operator
             if next_byte in po.WHITESPACE or next_byte in po.DELIMITERS:
-                # read back to the previous whitespace and check if it's an operator
-                if command[prev_whitespace:] in po.ALL_OPS:
-                    op = command[prev_whitespace:]
-                    operands = command[:prev_whitespace]
+                # read back to the previous delimiter and check if it's an operator
+                if command[prev_delim:] in po.ALL_OPS:
+                    op = command[prev_delim:]
+                    operands = command[:prev_delim]
 
                     if op == po.FONT_CHANGE:
+                        # update the current font
                         self.state["font"] = page_or_xobj.Resources.Font[
                             operands.split()[0].decode()
                         ].objgen
@@ -497,22 +484,22 @@ class Mangler:
                         pass
 
                     # write the command to the new stream
-                    new_b += operands + op
+                    new_b.write(operands + op)
 
                     # reset the command
                     command = b""
                     c_pos = 0
-                    prev_whitespace = 1
+                    prev_delim = 1
                 else:
                     # not an operator, advance the whitespace index and keep going
-                    prev_whitespace = c_pos + 1
+                    prev_delim = c_pos + 1
 
             # always add the next byte, even if it's whitespace
             command += next_byte
             c_pos += 1
             next_byte = b.read(1)
 
-        return new_b
+        return new_b.getvalue()
 
         for i, (operands, operator) in enumerate(og_commands):
             if block is not None:

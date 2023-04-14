@@ -36,3 +36,10 @@ def test_map_charset():
 def test_map_numeric_range():
     expected_cats = {"Nd": "0123456789", "Lu": "ABC", "default": {"Nd": "0123456789", "Lu": "ABC"}}
     assert dict_equal(expected_cats, tu.map_numeric_range(48, 67))
+
+
+def test_replace_bytes():
+    test_arg = b"(Something) 4 (T) TJ"
+    mangled = tu.replace_bytes(test_arg)
+    assert mangled != test_arg
+    assert len(mangled) == len(test_arg)
