@@ -105,7 +105,13 @@ class Mangler:
         """
         self._pdf = pdf
         self.create_hash_name()
-        self.state = {"point": None, "font": "default", "page": 0, "page_dims": [0, 0, 0]}
+        self.state = {
+            "point": None,
+            "font": "default",
+            "page": 0,
+            "page_dims": [612, 792],
+            "visited_streams": [],
+        }
         self.font_map = {
             "default": tu.LATIN_1,
         }
@@ -318,7 +324,7 @@ class Mangler:
         Creates a new name for the pdf based on the unique ID.
         """
         if "/ID" in self._pdf.trailer.keys():
-            self.hash_name = hashlib.md5(bytes(self._pdf.trailer.ID[0])).hexdigest()
+            self.hash_name = hashlib.md5(bytes(self._pdf.trailer["/ID"][0])).hexdigest()
         else:
             # Loop through the pages and concatenate contents, then hash.
             # This ignores metadata and probably doesn't guarantee a consistent ID.
@@ -371,20 +377,34 @@ class Mangler:
         """
         Randomly tweaks the number num, then writes to a byte string of length width.
         """
-        new_val = num + random.uniform(-max_tweak, max_tweak)
-        # make sure the sign isn't different, that takes up more space in the string
-        if num < 0 and new_val > 0 or num > 0 and new_val < 0:
-            new_val = -new_val
+        # get the number of digits, number of decimals, and sign
+        digits = 1
+        negative = num < 0
+        if abs(num) >= 1:
+            digits = int(log10(abs(num))) + 1
 
-        n_dec = width - int(log10(abs(new_val))) - 2
+        # number of decimals in the original number
+        n_dec = width - digits - negative - 1
+
+        # find the lower and upper bounds for the tweaked number
+        if num >= 0:
+            lower = max(0, num - max_tweak)
+            upper = min(num + max_tweak, 10**digits - 1)
+        else:
+            lower = max(num - max_tweak, -(10**digits) + 1)
+            upper = min(0, num + max_tweak)
+
+        # randomly tweak the number
+        new_val = random.uniform(lower, upper)
+
         if n_dec < 1:
             # it's an integer
-            new_val = int(new_val)
-            return f"{new_val:{width}d}".encode()
+            return f"{int(new_val):{width}d}".encode()
+        else:
+            # account for the decimal point in the width
+            return f"{new_val:{width - 1}.{n_dec}f}".encode()
 
-        return f"{new_val:{width}.{n_dec}f}".encode()
-
-    def mangle_path(self, operands: bytes, operator: bytes) -> list:
+    def mangle_path(self, operands: bytes, operator: bytes) -> bytes:
         """
         Randomly modifies path construction operands to mangle vector graphics.
         """
@@ -489,19 +509,42 @@ class Mangler:
         # keep track of the previous delimiter position (relative to the command)
         prev_delim = 0
         c_pos = 0
+        is_comment = False
+        is_string_literal = False
         while next_byte:
-            # if it's whitespace or a tag, check if we have an operator
-            if next_byte in po.WHITESPACE or next_byte in po.DELIMITERS:
+            # first check if there's a comment
+            if next_byte == b"%":
+                is_comment = True
+
+            if next_byte == b"(":
+                # string literal, don't check for operators
+                is_string_literal = True
+
+            if is_comment:
+                # ignore everything until the end of the line
+                if next_byte in b"\n\r\x0c":
+                    is_comment = False
+                    prev_delim = c_pos + 1
+            elif is_string_literal:
+                if next_byte == b")":
+                    is_string_literal = False
+                    prev_delim = c_pos + 1
+            # if it's whitespace or other delimiter, check if we have an operator
+            elif next_byte in po.WHITESPACE or next_byte in po.DELIMITERS:
                 # read back to the previous delimiter and check if it's an operator
                 if command[prev_delim:] in po.ALL_OPS:
                     op = command[prev_delim:]
                     operands = command[:prev_delim]
 
                     if op == po.FONT_CHANGE:
-                        # update the current font
-                        self.state["font"] = page_or_xobj.Resources.Font[
-                            operands.split()[0].decode()
-                        ].objgen
+                        try:
+                            # update the current font
+                            self.state["font"] = page_or_xobj.Resources.Font[
+                                operands.split()[0].decode()
+                            ].objgen
+                        except (KeyError, AttributeError):
+                            # font not found, default to the previous one
+                            pass
                     elif op in po.TEXT_SHOW_OPS:
                         operands = self.mangle_text(operands, op)
                     elif op in po.CLIPPING_PATH_OPS and self.config("path", "exclude_clip"):
@@ -526,33 +569,9 @@ class Mangler:
             c_pos += 1
             next_byte = b.read(1)
 
+        # write the last command
+        new_b.write(command)
         return new_b.getvalue()
-
-        for i, (operands, operator) in enumerate(og_commands):
-            if block is not None:
-                block.append((operands, operator))
-            elif operator == FONT_CHANGE:
-                self.state["font"] = page_or_xobj.Resources.Font[operands[0]].objgen
-            elif operator in TEXT_SHOW_OPS:
-                self.mangle_text(operands)
-            elif operator in CLIPPING_PATH_OPS and self.config("path", "exclude_clip"):
-                # back up, undo the previous path modification
-                for j in range(len(commands) - 1, -1, -1):
-                    if commands[j][1] in PATH_CONSTRUCTION_OPS:
-                        commands[j] = og_commands[j]
-                    if commands[j][1] in PATH_START_OPS:
-                        break
-            elif operator in BLOCK_BEGIN_OPS:
-                # start of a block, so we need to save a buffer and mangle all at once
-                block = [(operands, operator)]
-            elif operator in BLOCK_END_OPS:
-                # end of a block, mangle away
-                self.mangle_block(block)
-                block = None
-            elif operator in PATH_CONSTRUCTION_OPS:
-                operands = self.mangle_path(list(operands), str(operator))
-
-            commands.append((operands, operator))
 
     def mangle_content(self, page_or_xobj: pikepdf.Object) -> None:
         """
@@ -560,6 +579,10 @@ class Mangler:
         Replace text with random characters and distort vector graphics.
         """
         if not self.config("mangle", "content"):
+            return
+
+        # if we've already visited this stream, don't do it again
+        if page_or_xobj.objgen in self.state["visited_streams"]:
             return
 
         if "/Contents" in page_or_xobj.keys():
@@ -572,6 +595,9 @@ class Mangler:
                 page_or_xobj.Contents.write(self.mangle_stream(page_or_xobj.Contents, page_or_xobj))
         else:
             page_or_xobj.write(self.mangle_stream(page_or_xobj, page_or_xobj))
+
+        # add this stream to the visited list
+        self.state["visited_streams"].append(page_or_xobj.objgen)
 
     def mangle_references(self, page: pikepdf.Page) -> None:
         """

@@ -66,3 +66,36 @@ def test_png_image():
     mglr.mangle_pdf()
     mglr.save()
     assert os.path.exists(mglr.hash_name)
+
+
+def test_tweak_num(fake_doc):
+    mglr = mangler.Mangler(pdf=fake_doc)
+
+    for width in [1, 3, 4, 5]:
+        newb = mglr.tweak_num(0, 18, width)
+        assert len(newb) == width
+
+    newb = mglr.tweak_num(-0.676, 18, 6)
+    assert len(newb) == 6
+
+
+def test_mangle_stream(fake_doc):
+    mglr = mangler.Mangler(pdf=fake_doc)
+    newstream = mglr.mangle_stream(fake_doc, None)
+    assert len(newstream.split()) == len(fake_doc.commands.split())
+    assert len(newstream) == len(fake_doc.commands)
+
+
+class FakePDF:
+    def __init__(self):
+        self.trailer = {"/ID": [b"<1234567890>", b"<0987654321>"]}
+        with open("test_stream.txt", "rb") as f:
+            self.commands = f.read()
+
+    def get_stream_buffer(self):
+        return self.commands
+
+
+@pytest.fixture
+def fake_doc():
+    return FakePDF()
