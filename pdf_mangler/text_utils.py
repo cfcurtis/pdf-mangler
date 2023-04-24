@@ -3,6 +3,7 @@ import unicodedata
 import random
 import logging
 import re
+import pikepdf  # provides pdfdoc encoding
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,23 @@ def map_charset(charset: str) -> dict:
     """
     char_glyphs = get_font_glyphs(charset)
     return categorize_glyphs(char_glyphs)
+
+
+def map_unicode(stream: bytes) -> dict:
+    """
+    Parses the ToUnicode stream and returns a dict of hex/unicode pairs.
+    """
+    to_unicode = {}
+    start = stream.find(b"beginbfchar")
+    end = stream.find(b"endbfchar")
+    matches = in_angle.findall(stream[start + 11 : end])
+    for i in range(0, len(matches), 2):
+        to_unicode[matches[i]] = chr(int(matches[i + 1], 16))
+
+    # map the resulting charset
+    char_cats = categorize_glyphs("".join(to_unicode.values()))
+    char_cats["ToUnicode"] = to_unicode
+    return char_cats
 
 
 def categorize_glyphs(glyphs: str) -> dict:
@@ -165,25 +183,29 @@ def replace_bytes(text: bytes, char_cats: dict = LATIN_1) -> bytes:
         # replace the text in the parentheses.
         # Probably a better way of doing this that doesn't require converting to/from strings
         random_text[match.start(1) : match.end(1)] = replace_text(
-            match.group(1).decode(), char_cats
-        ).encode()
+            match.group(1).decode("pdfdoc"), char_cats
+        ).encode("pdfdoc")
 
     return random_text
 
 
-def replace_hex_bytes(text: bytes, unicode_mapping: dict) -> bytes:
+def replace_hex_bytes(text: bytes, char_cats: dict = LATIN_1) -> bytes:
     """
     Replace hexadecimally encoded text.
     """
     random_text = bytearray(text)
 
-    # TODO: use unicode mapping to convert hex to unicode, then do unicode mapping
-    char_cats = {}
-
     # check for angle brackets indicating hex encoding
     for match in in_angle.finditer(text):
         # more complicated, we need to go through each pair of hex digits
         for i in range(match.start(1), match.end(1) - 1, 2):
-            random_text[i : i + 2] = replace_text(text[i : i + 2].decode(), char_cats).encode()
+            try:
+                hex_char = text[i : i + 2]
+            except IndexError:
+                # if there's an odd number of characters, the last one is assumed to be 0. Just leave it.
+                pass
+
+            unihex = char_cats["ToUnicode"][hex_char]
+            random_text[i : i + 2] = replace_text(unihex, char_cats).encode()
 
     return random_text

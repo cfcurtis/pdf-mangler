@@ -349,6 +349,9 @@ class Mangler:
 
         if "/FontDescriptor" in font.keys() and "/CharSet" in font.FontDescriptor.keys():
             self.font_map[name] = tu.map_charset(str(font.FontDescriptor.CharSet))
+        elif "/ToUnicode" in font.keys():
+            # get the unicode mapping
+            self.font_map[name] = tu.map_unicode(font.ToUnicode.read_bytes())
         elif "/FirstChar" in font.keys():
             # define the map based on the first char and last char
             self.font_map[name] = tu.map_numeric_range(int(font.FirstChar), int(font.LastChar))
@@ -356,14 +359,18 @@ class Mangler:
             # Assume it's Latin-1
             self.font_map[name] = tu.LATIN_1
 
-    def mangle_text(self, operands: bytes, operator: bytes) -> bytes:
+    def mangle_text(self, operands: bytes) -> bytes:
         """
         Modifies the text operands.
         """
         if not self.config("mangle", "text"):
             return operands
 
-        return tu.replace_bytes(operands, self.font_map[self.state["font"]])
+        # check if the operands have normal strings or hexadecimal
+        if b"<" in operands[:2]:
+            return tu.replace_hex_bytes(operands, self.font_map[self.state["font"]])
+        else:
+            return tu.replace_bytes(operands, self.font_map[self.state["font"]])
 
     def is_background_line(self, dx: float, dy: float) -> bool:
         """
@@ -546,7 +553,7 @@ class Mangler:
                             # font not found, default to the previous one
                             pass
                     elif op in po.TEXT_SHOW_OPS:
-                        operands = self.mangle_text(operands, op)
+                        operands = self.mangle_text(operands)
                     elif op in po.CLIPPING_PATH_OPS and self.config("path", "exclude_clip"):
                         # TBD
                         pass
