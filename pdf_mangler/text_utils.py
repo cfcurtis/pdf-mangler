@@ -11,6 +11,8 @@ PASS_CATS = set("PMZCS")
 
 # compile the regex to look for things between ()
 in_parens = re.compile(rb"\((.*?)\)")
+# compile the regex to look for things between <>
+in_angle = re.compile(rb"\<(.*?)\>")
 
 # Read the glyphlist file and define as a constant
 GLYPHLIST = {}
@@ -165,5 +167,23 @@ def replace_bytes(text: bytes, char_cats: dict = LATIN_1) -> bytes:
         random_text[match.start(1) : match.end(1)] = replace_text(
             match.group(1).decode(), char_cats
         ).encode()
+
+    return random_text
+
+
+def replace_hex_bytes(text: bytes, unicode_mapping: dict) -> bytes:
+    """
+    Replace hexadecimally encoded text.
+    """
+    random_text = bytearray(text)
+
+    # TODO: use unicode mapping to convert hex to unicode, then do unicode mapping
+    char_cats = {}
+
+    # check for angle brackets indicating hex encoding
+    for match in in_angle.finditer(text):
+        # more complicated, we need to go through each pair of hex digits
+        for i in range(match.start(1), match.end(1) - 1, 2):
+            random_text[i : i + 2] = replace_text(text[i : i + 2].decode(), char_cats).encode()
 
     return random_text
