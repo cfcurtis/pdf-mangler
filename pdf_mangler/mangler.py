@@ -388,11 +388,11 @@ class Mangler:
 
         # find the lower and upper bounds for the tweaked number
         if num >= 0:
-            lower = max(0, num - max_tweak)
+            lower = max(10 ** (digits - 1) + 1, num - max_tweak)
             upper = min(num + max_tweak, 10**digits - 1)
         else:
             lower = max(num - max_tweak, -(10**digits) + 1)
-            upper = min(0, num + max_tweak)
+            upper = min(-(10 ** (digits - 1)) - 1, num + max_tweak)
 
         # randomly tweak the number
         new_val = random.uniform(lower, upper)
@@ -515,9 +515,8 @@ class Mangler:
             # first check if there's a comment
             if next_byte == b"%":
                 is_comment = True
-
-            if next_byte == b"(":
-                # string literal, don't check for operators
+            # Then check for a string literal (don't check for operators)
+            elif next_byte == b"(":
                 is_string_literal = True
 
             if is_comment:
@@ -526,10 +525,11 @@ class Mangler:
                     is_comment = False
                     prev_delim = c_pos + 1
             elif is_string_literal:
+                # ignore everything until the end of the string
                 if next_byte == b")":
                     is_string_literal = False
                     prev_delim = c_pos + 1
-            # if it's whitespace or other delimiter, check if we have an operator
+            # Finally, check if the next byte is whitespace or other delimiter
             elif next_byte in po.WHITESPACE or next_byte in po.DELIMITERS:
                 # read back to the previous delimiter and check if it's an operator
                 if command[prev_delim:] in po.ALL_OPS:
@@ -716,18 +716,19 @@ class Mangler:
 
     def save(self, folder: str = ".") -> None:
         """
-        Save the mangled pdf.
+        Save the mangled pdf, attempting to preserve content as much as possible.
+        Blows away the encryption.
         """
-        enc = None
-        # copy over the encryption info, but blow away the passwords
-        if self._pdf.is_encrypted:
-            enc = pikepdf.Encryption(
-                owner="",
-                user="",
-                R=self._pdf.encryption.R,
-                allow=self._pdf.allow,
-            )
-        self._pdf.save(Path(folder) / self.hash_name, fix_metadata_version=False, encryption=enc)
+        self._pdf.save(
+            Path(folder) / self.hash_name,
+            preserve_pdfa=False,
+            force_version=self._pdf.pdf_version,
+            fix_metadata_version=False,
+            object_stream_mode=pikepdf.ObjectStreamMode.preserve,
+            normalize_content=False,
+            linearize=False,
+            encryption=False,
+        )
 
 
 def main(log_level: int = logging.INFO, show_output: bool = False) -> None:

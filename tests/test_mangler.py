@@ -72,11 +72,28 @@ def test_tweak_num(fake_doc):
     mglr = mangler.Mangler(pdf=fake_doc)
 
     for width in [1, 3, 4, 5]:
+        # positive integer
+        newb = mglr.tweak_num(1, 18, width)
+        assert len(newb) == width
+        # zero
         newb = mglr.tweak_num(0, 18, width)
         assert len(newb) == width
+        # negative integer
+        newb = mglr.tweak_num(-1, 18, width)
 
-    newb = mglr.tweak_num(-0.676, 18, 6)
-    assert len(newb) == 6
+    for width in range(3, 10):
+        for sign in [-1, 1]:
+            # 0.333
+            newb = mglr.tweak_num(sign * 1 / 3, 18, width)
+            assert len(newb) == width
+
+            # more digits
+            newb = mglr.tweak_num(sign * 100 / 3, 18, width)
+            assert len(newb) == width
+
+    # specific troublesome number
+    newb = mglr.tweak_num(-2.386, 18, 7)
+    assert len(newb) == 7
 
 
 def test_mangle_stream(fake_doc):
@@ -89,7 +106,7 @@ def test_mangle_stream(fake_doc):
 class FakePDF:
     def __init__(self):
         self.trailer = {"/ID": [b"<1234567890>", b"<0987654321>"]}
-        with open("test_stream.txt", "rb") as f:
+        with open(Path(__file__).parent / "test_stream", "rb") as f:
             self.commands = f.read()
 
     def get_stream_buffer(self):
