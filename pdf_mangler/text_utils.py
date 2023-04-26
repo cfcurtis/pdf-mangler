@@ -79,6 +79,9 @@ def map_unicode(stream: bytes) -> dict:
     # map the resulting charset
     char_cats = categorize_glyphs("".join(to_unicode.values()))
     char_cats["ToUnicode"] = to_unicode
+
+    # and back again
+    char_cats["FromUnicode"] = {val: key for key, val in to_unicode.items()}
     return char_cats
 
 
@@ -205,7 +208,11 @@ def replace_hex_bytes(text: bytes, char_cats: dict = LATIN_1) -> bytes:
                 # if there's an odd number of characters, the last one is assumed to be 0. Just leave it.
                 pass
 
+        try:
             unihex = char_cats["ToUnicode"][hex_char]
-            random_text[i : i + 2] = replace_text(unihex, char_cats).encode()
+            newtext = replace_text(unihex, char_cats).encode()
+            random_text[i : i + 2] = char_cats["FromUnicode"][newtext.decode()]
+        except KeyError as e:
+            logger.warning(e)
 
     return random_text
