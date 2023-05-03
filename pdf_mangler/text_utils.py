@@ -3,7 +3,6 @@ import unicodedata
 import random
 import logging
 import re
-import pikepdf  # provides pdfdoc encoding
 
 logger = logging.getLogger(__name__)
 
@@ -186,8 +185,8 @@ def replace_bytes(text: bytes, char_cats: dict = LATIN_1) -> bytes:
         # replace the text in the parentheses.
         # Probably a better way of doing this that doesn't require converting to/from strings
         random_text[match.start(1) : match.end(1)] = replace_text(
-            match.group(1).decode("pdfdoc"), char_cats
-        ).encode("pdfdoc")
+            match.group(1).decode(), char_cats
+        ).encode()
 
     return random_text
 

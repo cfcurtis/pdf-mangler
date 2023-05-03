@@ -347,6 +347,8 @@ class Mangler:
         """
         name = font.objgen
 
+        # TODO: Font Differences not being handled appropriately. ToUnicode is also incomplete.
+
         if "/FontDescriptor" in font.keys() and "/CharSet" in font.FontDescriptor.keys():
             self.font_map[name] = tu.map_charset(str(font.FontDescriptor.CharSet))
         elif "/ToUnicode" in font.keys():
