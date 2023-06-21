@@ -33,6 +33,45 @@ def test_map_charset():
     assert dict_equal(expected_cats, tu.map_charset(charset))
 
 
+def test_to_unicode():
+    # font stream from page 358 of ISO 32000-2:2020 with errata
+    stream = rb"""
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo
+<</Registry (Adobe)
+/Ordering (UCS2)
+/Supplement 0
+>> def
+/CMapName /Adobe-Identity-UCS2 def
+/CMapType 2 def
+1 begincodespacerange
+<0000>  <FFFF>
+endcodespacerange
+2 beginbfrange
+<0000>  <005E>  <0020>
+<005F>  <0061>   [<00660066> <00660069> <00660066006C>]
+endbfrange
+1 beginbfchar
+<3A51> <D840DC3E>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+"""
+    font_map = tu.map_unicode(stream)
+    assert (
+        font_map["ToUnicode"][b"3A51"] == "\ud840\udc3e"
+    )  # surrogate pair, not sure how to actually handle this...
+    assert font_map["ToUnicode"][b"0000"] == " "
+    assert font_map["ToUnicode"][b"0001"] == " "
+    assert font_map["ToUnicode"][b"005F"] == "ff"
+    assert font_map["ToUnicode"][b"0060"] == "fi"
+    assert font_map["ToUnicode"][b"0061"] == "ffl"
+
+
 def test_map_numeric_range():
     expected_cats = {"Nd": "0123456789", "Lu": "ABC", "default": {"Nd": "0123456789", "Lu": "ABC"}}
     assert dict_equal(expected_cats, tu.map_numeric_range(48, 67))

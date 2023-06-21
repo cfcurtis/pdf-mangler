@@ -13,6 +13,8 @@ PASS_CATS = set("PMZCS")
 in_parens = re.compile(rb"\((.*?)\)")
 # compile the regex to look for things between <>
 in_angle = re.compile(rb"\<(.*?)\>")
+# compile the regex to look for things between []
+in_square_brackets = re.compile(rb"\[(.*?)\]")
 
 # Read the glyphlist file and define as a constant
 GLYPHLIST = {}
@@ -44,15 +46,15 @@ with open(os.path.join(os.path.dirname(__file__), "fonts/adobe-latin-1.txt")) as
         if cat[0] in PASS_CATS:
             continue
         elif cat not in LATIN_1.keys():
-            LATIN_1[cat] = char
+            LATIN_1[cat] = [char]
         else:
-            LATIN_1[cat] += char
+            LATIN_1[cat] += [char]
 
 LATIN_1["default"] = {
     # The "default" should really be defined based on the language of the PDF
-    "Lu": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-    "Ll": "abcdefghijklmnopqrstuvwxyz",
-    "Nd": "0123456789",
+    "Lu": list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+    "Ll": list("abcdefghijklmnopqrstuvwxyz"),
+    "Nd": list("0123456789"),
 }
 
 
@@ -64,6 +66,31 @@ def map_charset(charset: str) -> dict:
     return categorize_glyphs(char_glyphs)
 
 
+def int_to_pdf_hex(i: int) -> bytes:
+    """
+    Converts an integer to a PDF-like hex string.
+    """
+    return f"{i:04X}".encode()
+
+
+def pdf_hex_to_int(hex: bytes) -> int:
+    """
+    Converts a PDF-like hex string to an integer.
+    """
+    return int(hex, 16)
+
+
+def map_pair(from_b: bytes, to_b: bytes, to_unicode: dict) -> None:
+    """
+    Establishes the actual mapping between bytes
+    """
+    to_unicode[from_b] = ""
+    # handle the case where the character maps to a combination of characters
+    # split matches[i + 1] into groups of 4
+    for j in range(0, len(to_b), 4):
+        to_unicode[from_b] += chr(int(to_b[j : j + 4], 16))
+
+
 def map_unicode(stream: bytes) -> dict:
     """
     Parses the ToUnicode stream and returns a dict of hex/unicode pairs.
@@ -71,12 +98,44 @@ def map_unicode(stream: bytes) -> dict:
     to_unicode = {}
     start = stream.find(b"beginbfchar")
     end = stream.find(b"endbfchar")
-    matches = in_angle.findall(stream[start + 11 : end])
+    matches = in_angle.findall(stream, start + 11, end)
     for i in range(0, len(matches), 2):
-        to_unicode[matches[i]] = chr(int(matches[i + 1], 16))
+        map_pair(matches[i], matches[i + 1], to_unicode)
+
+    start = stream.find(b"beginbfrange")
+    end = stream.find(b"endbfrange")
+    angle_it = in_angle.finditer(stream, start + 13, end)
+    square_it = in_square_brackets.finditer(stream, start + 13, end)
+    angle = next(angle_it, None)
+    square = next(square_it, None)
+
+    while angle:
+        rs = pdf_hex_to_int(angle.group(1))
+        angle = next(angle_it, None)
+        re = pdf_hex_to_int(angle.group(1))
+        map_from = map(int_to_pdf_hex, range(rs, re + 1))
+        map_to = next(angle_it, None)
+
+        # check to see if the next square bracket is before the next angle bracket
+        # This should mean that there's one character per char in the range
+        if square and square.start() < map_to.start():
+            for from_b in map_from:
+                if map_to.end() > square.end():
+                    # something's gone crazy
+                    raise IndexError("Not enough characters to map to in bfrange")
+
+                map_pair(from_b, map_to.group(1), to_unicode)
+                map_to = next(angle_it, None)
+
+        # otherwise, the whole range maps to the same character
+        else:
+            for from_b in map_from:
+                map_pair(from_b, map_to.group(1), to_unicode)
+
+        angle = next(angle_it, None)
 
     # map the resulting charset
-    char_cats = categorize_glyphs("".join(to_unicode.values()))
+    char_cats = categorize_glyphs(to_unicode.values())
     char_cats["ToUnicode"] = to_unicode
 
     # and back again
@@ -84,18 +143,24 @@ def map_unicode(stream: bytes) -> dict:
     return char_cats
 
 
-def categorize_glyphs(glyphs: str) -> dict:
+def categorize_glyphs(glyphs: list[str]) -> dict:
     """
     Maps the characters in the given glyphs to their Unicode category.
     """
     cats = {}
-    for cat, char in zip(map(unicodedata.category, glyphs), glyphs):
+    for char in glyphs:
+        try:
+            cat = unicodedata.category(char)
+        except TypeError:
+            # must be a surrogate pair
+            cat = "Cs"
+
         if cat[0] in PASS_CATS:
             pass
         elif cat not in cats.keys():
-            cats[cat] = char
+            cats[cat] = [char]
         else:
-            cats[cat] += char
+            cats[cat] += [char]
 
     # create a subset of the categories that are in the default categories
     cats["default"] = {}
