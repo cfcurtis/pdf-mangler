@@ -91,7 +91,7 @@ def map_pair(from_b: bytes, to_b: bytes, to_unicode: dict) -> None:
         to_unicode[from_b] += chr(int(to_b[j : j + 4], 16))
 
 
-def map_unicode(stream: bytes) -> dict:
+def map_unicode(stream: bytes, char_cats: dict = {}) -> dict:
     """
     Parses the ToUnicode stream and returns a dict of hex/unicode pairs.
     """
@@ -135,7 +135,9 @@ def map_unicode(stream: bytes) -> dict:
         angle = next(angle_it, None)
 
     # map the resulting charset
-    char_cats = categorize_glyphs(to_unicode.values())
+    if not char_cats:
+        char_cats = categorize_glyphs(to_unicode.values())
+
     char_cats["ToUnicode"] = to_unicode
 
     # and back again
@@ -169,7 +171,7 @@ def categorize_glyphs(glyphs: list[str]) -> dict:
             continue
 
         if key in LATIN_1["default"].keys():
-            isect = "".join(set(cats[key]).intersection(set(LATIN_1["default"][key])))
+            isect = list(set(cats[key]).intersection(set(LATIN_1["default"][key])))
             if len(isect) > 0:
                 cats["default"][key] = isect
 

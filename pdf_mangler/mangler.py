@@ -347,13 +347,16 @@ class Mangler:
         """
         name = font.objgen
 
-        # TODO: Font Differences not being handled appropriately. ToUnicode is also incomplete.
+        # TODO: Font Differences not being handled appropriately. Still haven't figured out how \\370 in the SigConf sample maps to ø. This set of if statements also probably belongs in test_utils.py.
 
+        self.font_map[name] = {}
         if "/FontDescriptor" in font.keys() and "/CharSet" in font.FontDescriptor.keys():
             self.font_map[name] = tu.map_charset(str(font.FontDescriptor.CharSet))
-        elif "/ToUnicode" in font.keys():
+
+        # Even with a charset defined, we might need the ToUnicode definition
+        if "/ToUnicode" in font.keys():
             # get the unicode mapping
-            self.font_map[name] = tu.map_unicode(font.ToUnicode.read_bytes())
+            self.font_map[name] = tu.map_unicode(font.ToUnicode.read_bytes(), self.font_map[name])
         elif "/FirstChar" in font.keys():
             # define the map based on the first char and last char
             self.font_map[name] = tu.map_numeric_range(int(font.FirstChar), int(font.LastChar))
