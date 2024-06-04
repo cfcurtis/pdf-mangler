@@ -632,6 +632,11 @@ def main(log_level: int = logging.INFO, show_output: bool = False) -> None:
     """
     Main function to create and run the Mangler.
     """
+
+    if len(sys.argv) < 2:
+        print("Usage: pdf-mangler <pdf_file> [config_file]")
+        sys.exit(1)
+
     # configure the log file, if it's not already done
     root_logger = logging.getLogger()
     if not root_logger.hasHandlers():

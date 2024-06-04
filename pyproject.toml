@@ -1,6 +1,6 @@
 [project]
 name = "pdf-mangler"
-version = "0.1.4"
+version = "0.1.5"
 description = "Anonymize and obfuscate PDF info while retaining structure"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -15,15 +15,31 @@ classifiers = [
     "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
     "Operating System :: OS Independent"
 ]
+dependencies = [
+    "pikepdf >= 8.11.1",
+    "tqdm",
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pre-commit",
+    "black",
+]
 
 [project.urls]
 repository = "https://github.com/cfcurtis/pdf-mangler"
+
+[project.scripts]
+pdf-mangler = "pdf_mangler.mangler:main"
 
 [build-system]
 requires = ["setuptools"]
 
 [tool.setuptools]
 packages = ["pdf_mangler"]
+include-package-data = true
 
 [tool.black]
 line-length = 100
