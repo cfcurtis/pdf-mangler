@@ -1,6 +1,6 @@
 [project]
 name = "pdf-mangler"
-version = "0.1.5"
+version = "0.1.6"
 description = "Anonymize and obfuscate PDF info while retaining structure"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -16,7 +16,7 @@ classifiers = [
     "Operating System :: OS Independent"
 ]
 dependencies = [
-    "pikepdf >= 8.11.1",
+    "pikepdf >= 9.1.1",
     "tqdm",
     "PyYAML",
 ]
