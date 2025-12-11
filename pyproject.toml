@@ -4,7 +4,7 @@ version = "0.1.6"
 description = "Anonymize and obfuscate PDF info while retaining structure"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {file = "LICENSE"}
+license = "MPL-2.0"
 keywords = ["pdf", "utility", "anonymization", "privacy"]
 authors = [
     {name = "Charlotte Curtis"},
@@ -12,7 +12,6 @@ authors = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
     "Operating System :: OS Independent"
 ]
 dependencies = [
@@ -38,7 +37,7 @@ pdf-mangler = "pdf_mangler.mangler:main"
 requires = ["setuptools"]
 
 [tool.setuptools]
-packages = ["pdf_mangler"]
+packages = ["pdf_mangler", "pdf_mangler.fonts"]
 include-package-data = true
 
 [tool.black]
